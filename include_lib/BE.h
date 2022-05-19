@@ -145,6 +145,8 @@ double geffT(double x);
 double Yeq(std::string name,double T);
 double Massp(std::string name,param_t &pp);
 double jac(complex_t sqss,Eigen::VectorXd &mm,vector<double> const &rr,int const &intp,int const &outp);
+std::vector<std::vector<complex_t>> pmom_std(
+        complex_t sqss,std::vector<double> &mm,vector<double> const &cthz,vector<double> const &rr,int const &inp, int const &outp);
 Eigen::MatrixXcd pmom(complex_t sqss,Eigen::VectorXd &mm,vector<double> const &cthz,vector<double> const &rr,int const &inp, int const &outp);
 Eigen::MatrixXcd Mass(Eigen::VectorXcd &th,Eigen::VectorXcd &mm);
 Eigen::MatrixXcd expM(Eigen::MatrixXd M,int &dim);

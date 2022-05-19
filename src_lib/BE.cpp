@@ -1,4 +1,5 @@
 #include "BE.h"
+#include <array>
 
 
 
@@ -305,8 +306,113 @@ double jac(complex_t sqss,Eigen::VectorXd &mm,vector<double> const &rr,int const
     return res;
 }
 
+template<class Type>
+Type product(array<Type, 3> const &p, array<Type, 3> const &q)
+{
+    return p[0]*q[0] + p[1]*q[1] + p[2]*q[2];
+}
 
-Eigen::MatrixXcd pmom(complex_t sqss,Eigen::VectorXd &mm,vector<double> const &cthz,vector<double> const &rr,int const &inp, int const &outp)
+vector<vector<complex_t>> pmom_std(
+        complex_t sqss,
+        vector<double> &mm,
+        vector<double> const &cthz,
+        vector<double> const &rr,
+        int const &inp, 
+        int const &outp)
+{
+    vector<vector<complex_t>> res(inp+outp);
+    for (auto &row : res) {
+        row = vector<complex_t>(inp+outp, 0);
+    }
+    
+    array<array<complex_t, 3>, 4> pmom = {0};
+    
+    if((inp==1)&&(outp==3))
+    {
+        double mD = mm[0];
+        double m1 = mm[1];
+        double m2 = mm[2];
+        double m3 = mm[3];
+        double cth1 = cthz[0];
+        double cth2 = cthz[1];
+        
+        double s23 = pow(m2 + m3 + (-m1 - m2 - m3 + mD)*rr[0],2.);
+        
+        pmom[0] = {mD, 0.,0.};
+        pmom[1] = {(sqrt(pow(mD,2))*(1 + pow(m1,2)/pow(mD,2) - s23/pow(mD,2)))/2.,
+        (Complex(0,-0.5)*sqrt(1 - pow(cth1,2))*sqrt(L(pow(mD,2),pow(m1,2),s23)))/sqrt(pow(mD,2)),
+        (Complex(0,-0.5)*cth1*sqrt(L(pow(mD,2),pow(m1,2),s23)))/sqrt(pow(mD,2))};
+        pmom[2] = {(-((pow(m1,2) - pow(mD,2) - s23)*(pow(m2,2) - pow(m3,2) + s23)) +
+                    (cth1*cth2 + sqrt(1 - pow(cth1,2))*sqrt(1 - pow(cth2,2)))*sqrt(L(pow(mD,2),pow(m1,2),s23))*sqrt(L(s23,pow(m2,2),pow(m3,2))))/
+        (4.*sqrt(pow(mD,2))*s23),(Complex(0,0.25)*(sqrt(1 - pow(cth1,2))*(pow(m2,2) - pow(m3,2) + s23)*sqrt(L(pow(mD,2),pow(m1,2),s23)) +
+                                                   (pow(cth1,2)*sqrt(1 - pow(cth2,2))*(pow(m1,2) - pow(mD,2) + 2*sqrt(pow(mD,2))*sqrt(s23) - s23) +
+                                                    sqrt(1 - pow(cth2,2))*(-pow(m1,2) + pow(mD,2) + s23) +
+                                                    cth1*sqrt(1 - pow(cth1,2))*cth2*(-pow(m1,2) + pow(mD,2) - 2*sqrt(pow(mD,2))*sqrt(s23) + s23))*sqrt(L(s23,pow(m2,2),pow(m3,2)))
+                                                   ))/(sqrt(pow(mD,2))*s23),(Complex(0,0.25)*(cth1*(pow(m2,2) - pow(m3,2) + s23)*sqrt(L(pow(mD,2),pow(m1,2),s23)) +
+                                                                                              (2*cth2*sqrt(pow(mD,2))*sqrt(s23) + pow(cth1,2)*cth2*(-pow(m1,2) + pow(mD,2) - 2*sqrt(pow(mD,2))*sqrt(s23) + s23) +
+                                                                                               cth1*sqrt(1 - pow(cth1,2))*sqrt(1 - pow(cth2,2))*(-pow(m1,2) + pow(mD,2) - 2*sqrt(pow(mD,2))*sqrt(s23) + s23))*
+                                                                                              sqrt(L(s23,pow(m2,2),pow(m3,2)))))/(sqrt(pow(mD,2))*s23)};
+        pmom[3] = {(-((pow(m2,2) - pow(m3,2) - s23)*(-pow(m1,2) + pow(mD,2) + s23)) -
+                    (cth1*cth2 + sqrt(1 - pow(cth1,2))*sqrt(1 - pow(cth2,2)))*sqrt(L(pow(mD,2),pow(m1,2),s23))*sqrt(L(s23,pow(m2,2),pow(m3,2))))/
+        (4.*sqrt(pow(mD,2))*s23),(Complex(0,0.25)*(sqrt(1 - pow(cth1,2))*(-pow(m2,2) + pow(m3,2) + s23)*sqrt(L(pow(mD,2),pow(m1,2),s23)) -
+                                                   (pow(cth1,2)*sqrt(1 - pow(cth2,2))*(pow(m1,2) - pow(mD,2) + 2*sqrt(pow(mD,2))*sqrt(s23) - s23) +
+                                                    sqrt(1 - pow(cth2,2))*(-pow(m1,2) + pow(mD,2) + s23) +
+                                                    cth1*sqrt(1 - pow(cth1,2))*cth2*(-pow(m1,2) + pow(mD,2) - 2*sqrt(pow(mD,2))*sqrt(s23) + s23))*sqrt(L(s23,pow(m2,2),pow(m3,2)))
+                                                   ))/(sqrt(pow(mD,2))*s23),(Complex(0,0.25)*(cth1*(-pow(m2,2) + pow(m3,2) + s23)*sqrt(L(pow(mD,2),pow(m1,2),s23)) +
+                                                                                              (pow(cth1,2)*cth2*(pow(m1,2) - pow(mD,2) + 2*sqrt(pow(mD,2))*sqrt(s23) - s23) +
+                                                                                               cth1*sqrt(1 - pow(cth1,2))*sqrt(1 - pow(cth2,2))*(pow(m1,2) - pow(mD,2) + 2*sqrt(pow(mD,2))*sqrt(s23) - s23) -
+                                                                                               2*cth2*sqrt(pow(mD,2))*sqrt(s23))*sqrt(L(s23,pow(m2,2),pow(m3,2)))))/(sqrt(pow(mD,2))*s23)};
+        
+        res[0] = {product(pmom[0], pmom[0]), product(pmom[0], pmom[1]), product(pmom[0], pmom[2]), product(pmom[0], pmom[3])};
+        res[1] = {product(pmom[1], pmom[0]), product(pmom[1], pmom[1]), product(pmom[1], pmom[2]), product(pmom[1], pmom[3])};
+        res[2] = {product(pmom[2], pmom[0]), product(pmom[2], pmom[1]), product(pmom[2], pmom[2]), product(pmom[2], pmom[3])};
+        res[3] = {product(pmom[3], pmom[0]), product(pmom[3], pmom[1]), product(pmom[3], pmom[2]), product(pmom[3], pmom[3])};
+    }
+    if((inp==1)&&(outp==2)) {
+        double mD = mm[0];
+        double m1 = mm[1];
+        double m2 = mm[2];
+        
+        pmom[0] = {mD, 0.,0.};
+        pmom[1] = {(pow(m1,2) - pow(m2,2) + pow(mD,2))/(2.*sqrt(pow(mD,2))),0,
+        -0.5*(sqrt(L(pow(mD,2),pow(m1,2),pow(m2,2))))/sqrt(pow(mD,2))*1i};
+        pmom[2] = {(pow(m1,2) - pow(m2,2) + pow(mD,2))/(2.*sqrt(pow(mD,2))),0,
+        0.5*(sqrt(L(pow(mD,2),pow(m1,2),pow(m2,2))))/sqrt(pow(mD,2))*1i};
+        
+        res[0] = {product(pmom[0], pmom[0]), product(pmom[0], pmom[1]), product(pmom[0], pmom[2])};
+        res[1] = {product(pmom[1], pmom[0]), product(pmom[1], pmom[1]), product(pmom[1], pmom[2])};
+        res[2] = {product(pmom[2], pmom[0]), product(pmom[2], pmom[1]), product(pmom[2], pmom[2])};
+    }
+    if((inp==2)&&(outp==2)) {
+        double ss = pow(sqss.real(),2.);
+        double m1 = mm[0];
+        double m2 = mm[1];
+        double m3 = mm[2];
+        double m4 = mm[3];
+        double cth = cthz[0];
+        
+        pmom[0] = {((1 + pow(m1,2.)/ss - pow(m2,2.)/ss)*sqrt(ss))/2.,0,-sqrt(L(ss,pow(m1,2.),pow(m2,2.)))/(2.*sqrt(ss))*1i};
+        pmom[1] = {((1 - pow(m1,2.)/ss + pow(m2,2.)/ss)*sqrt(ss))/2.,0,sqrt(L(ss,pow(m1,2),pow(m2,2.)))/(2.*sqrt(ss))*1i};
+        pmom[2] = {((1 + pow(m3,2)/ss - pow(m4,2)/ss)*sqrt(ss))/2.,-0.5*(sqrt(1 - pow(cth,2))*sqrt(L(ss,pow(m3,2.),pow(m4,2.))))/sqrt(ss)*1i,
+        -0.5*(cth*sqrt(L(ss,pow(m3,2.),pow(m4,2.))))/sqrt(ss)*1i};
+        pmom[3] = {((1 - pow(m3,2.)/ss + pow(m4,2.)/ss)*sqrt(ss))/2.,0.5*(sqrt(1 - pow(cth,2.))*sqrt(L(ss,pow(m3,2.),pow(m4,2.))))/sqrt(ss)*1i,
+        0.5*(cth*sqrt(L(ss,pow(m3,2.),pow(m4,2.))))/sqrt(ss)*1i};
+        
+        res[0] = {product(pmom[0], pmom[0]), product(pmom[0], pmom[1]), product(pmom[0], pmom[2]), product(pmom[0], pmom[3])};
+        res[1] = {product(pmom[1], pmom[0]), product(pmom[1], pmom[1]), product(pmom[1], pmom[2]), product(pmom[1], pmom[3])};
+        res[2] = {product(pmom[2], pmom[0]), product(pmom[2], pmom[1]), product(pmom[2], pmom[2]), product(pmom[2], pmom[3])};
+        res[3] = {product(pmom[3], pmom[0]), product(pmom[3], pmom[1]), product(pmom[3], pmom[2]), product(pmom[3], pmom[3])};
+    }
+    return res;
+}
+
+Eigen::MatrixXcd pmom(
+        complex_t sqss,
+        Eigen::VectorXd &mm,
+        vector<double> const &cthz,
+        vector<double> const &rr,
+        int const &inp, 
+        int const &outp)
 {
     Eigen::MatrixXcd res(inp+outp,inp+outp);
     
@@ -563,8 +669,107 @@ complex_t Decay(int &pid,param_t &pp,Process prc,int loop)
     return res;
 }
 
+double gamma_std(int &pid,double const &T,param_t &data,Process prc,int loop)
+{
+    double result = 0;
+    
+    double gg = 1.;
+    vector< pair <int,double> > gvect;
+    
+    std::string pname = f_G[pid].name;
+    std::string ptl_mass = "m_";
+    
+    int in = prc.inParticles.size(),out = prc.outParticles.size();
+    
+    for(const auto &inpp : prc.inParticles) gg *= gptl[inpp.name];
+    
+    vector<double> mass;
+    for(const auto &prname : prc.inParticles)mass.push_back(ptlmap[prname.name]);
+    
+    for(const auto &prname : prc.outParticles)mass.push_back(ptlmap[prname.name]);
+    
+    if((in==2)&&(out==2)){
+        
+        double s,pin,pout;
+        
+        double ma,mb,m1,m2,ms,Tsc;
+        
+        ms = *max_element(mass.begin(), mass.end());
+        Tsc = T/ms;
+        ma = abs(mass[0]/ms);
+        mb = abs(mass[1]/ms);
+        m1 = abs(mass[2]/ms);
+        m2 = abs(mass[3]/ms);
+        int ii,jj;
+        double jac = 0.,mi=0.,mj=0.;
+        complex_t amp = 0.;
+        if((pow(ma+mb, 2.))>=(pow(m1+m2, 2.)))
+        {
+            mi=ma;
+            mj=mb;
+            
+        }
+        if((pow(ma+mb, 2.))<(pow(m1+m2, 2.)))
+        {
+            mi=m1;
+            mj=m2;
+        }
+        for (ii=0; ii<12; ii++)
+        {
+            for (jj=0; jj<13; jj++)
+            {
+                s = pow(mi-mj,2.) + 2.*mi*mj*(2. + xki[ii]);//xs1[ii](1.- xs1[ii]);
+                pin = 0.5*sqrt(L(s,ma*ma,mb*mb)/s).real();
+                pout = 0.5*sqrt(L(s,m1*m1,m2*m2)/s).real();
+                
+                vector<double> cth,rr;
+                cth.push_back(xs[jj]);
+                rr.push_back(1.);
+                auto pmat = pmom_std(sqrt(s)*ms,mass,cth,rr,in,out);
+                
+                data.s_12 = pmat[0][1].real();
+                data.s_13 = pmat[0][2].real();
+                data.s_14 = pmat[0][3].real();
+                data.s_23 = pmat[1][2].real();
+                data.s_24 = pmat[1][3].real();
+                data.s_34 = pmat[2][3].real();
+                
+                jac = gg*pow(ms,4.)*2.*mi*mj*aki[ii]*as[jj];//*(1./(pow(xs1[ii] - 1.,2.)));
+                amp = 0.;
+                if(loop==0){
+                    if(f_G[pid].name.find("Tree")!=std::string::npos){
+                        amp += f_G[pid](data)*jac;
+                    }
+                }
+                if(loop==1){
+                    if(f_G[pid].name.find("AsymL")!=std::string::npos){
+                        amp += f_G[pid](data)*jac;
+                    }
+                }
+                result += exp(xki[ii])*Tsc/(256.*pow(M_PI,5.))*pin*pout*amp.real()*1./sqrt(s)*cyl_bessel_k(1, sqrt(s)/Tsc);
+                cth.clear();
+                rr.clear();
+            }
+        }
+    }
+    
+    if(in==1)
+    {
+        complex_t decay = Decay(pid,data,prc,loop);
+        
+        double mD = mass[0];
+        result = gg*mD*mD/(2.*pow(M_PI,2.))*T*cyl_bessel_k(1, abs(mD)/T)*decay.real();
+    }
+    return result;
+}
+
 double gamma(int &pid,double const &T,param_t &data,Process prc,int loop)
 {
+    static constexpr bool use_std_gamma = true;
+    if constexpr (use_std_gamma)
+    {
+        return gamma_std(pid, T, data, prc, loop);
+    }
     double result = 0;
     
     double gg = 1.;
@@ -660,7 +865,6 @@ double gamma(int &pid,double const &T,param_t &data,Process prc,int loop)
     }
     return result;
 }
-
 
 
 double washout(double zz,param_t &pp,std::string name)
