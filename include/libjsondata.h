@@ -271,9 +271,9 @@ namespace mty::lib {
          */
         void loadFile(std::string const &nameFile);
 
-        private:
-
         void clear();
+
+        private:
 
         void load(std::unique_ptr<JSON::Node> const &tree);
 

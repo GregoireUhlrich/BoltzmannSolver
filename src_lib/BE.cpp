@@ -1,12 +1,8 @@
 #include "BE.h"
 
 
-#include <eigen3/Eigen/Eigenvalues>
-#include <eigen3/Eigen/Dense>
 
 using namespace std;
-
-using namespace leptoproto;
 
 using Eigen::MatrixXd;
 using namespace Eigen;
@@ -14,104 +10,228 @@ using namespace Eigen;
 
 using namespace mty::lib;
 
-#define NX 4
 
-plist XXSMSM[NX][NX];
-plist XSMXSM[NX][NX];
+namespace leptoproto{
 
-plist BXXSMSM[NX][NX];
-plist AntiBXXSMSM[NX][NX];
+std::map<std::string, double> ptlmap;
 
-plist BXSMXSM[NX][NX];
-plist AntiBXSMXSM[NX][NX];
+vector<std::string> Xptl;
 
+vector<std::string> SMptl;
 
-plist XSMSM[NX];
-plist BXSMSMSM[NX];
-plist AntiBXSMSMSM[NX];
+std::map<std::string, double> gptl;
 
-plist XXSM[NX];
-plist BXXSM[NX];
-plist AntiBXXSM[NX];
+std::vector<Process> procL;
+std::vector<Process> procQ;
 
-/*
- 
-double prtlm(std::string str,param_t const &pp)
+Eigen::MatrixXi GamQa, GamQb, GamLa, GamLb;
+Eigen::VectorXi DecayQ, DecayL;
+
+double Mscale;
+//=====================================================================
+
+complex_t Complex(int const &x,double const &y)
 {
-    double mass = 0.;
+    return x + y*1i;
+}
+
+double geffT(double x)
+{
+    int size = temp.size();
     
-    mass += (str.find("e")!=std::string::npos) ? pp.m_e : 0.;
-    mass += (str.find("mu")!=std::string::npos) ? pp.m_mu : 0.;
-    mass += (str.find("tau")!=std::string::npos) ? pp.m_tau : 0.;
-    mass += (str.find("eta_R")!=std::string::npos) ? pp.m_eta_R : 0.;
-    mass += (str.find("eta_I")!=std::string::npos) ? pp.m_eta_I : 0.;
-    mass += (str.find("etm")!=std::string::npos) ? pp.m_etm : 0.;
- 
-    //cout << "Mass :" << str << " => " << mass << endl;
-    return mass;
+    int i = 0;                  // find left end of interval for interpolation
+    if ( x >= temp[size - 2] )  // special case: beyond right end
+    {
+        i = size - 2;
+    }
+    else
+    {
+        while ( x > temp[i+1] ) i++;
+    }
+    double xL = temp[i], yL = geff[i], xR = geff[i+1], yR = geff[i+1];      // points on either side (unless beyond ends)
+    if ( x < xL ) yR = yL;
+    if ( x > xR ) yL = yR;
     
+    
+    double dydx = ( yR - yL ) / ( xR - xL );       // gradient
+    
+    return yL + dydx * ( x - xL );                 // linear interpolation
+}
+
+double Massp(std::string name,param_t &pp)
+{
+    double mi;
+    std::string ptl_mass = "m_";
+    
+    if (pp.realParams.find(ptl_mass + name) == pp.realParams.end())
+    { // no mass,
+        mi = 0.;
+    }
+    else{
+        auto pt_mass = pp.realParams[ptl_mass + name];
+        mi = *pt_mass;
+        
+    }
+    
+    return mi;
+}
+
+double Yeq(std::string name,double T)
+{
+    double yy = 0.;
+    double mi = ptlmap[name];//Massp(name,pp);
+    double gi = 1.;
+    gi *= gptl[name];
+    if(mi>0.)
+    {
+        yy = 45.*gi/geffT(T)*pow(mi/(2.*M_PI*T),2.)*cyl_bessel_k(2, mi/T);
+    }
+    if(mi==0.)
+    {
+        yy = 45./2.*gi/geffT(T)*pow(M_PI,-4.); //cout << "h1!!" << endl;
+    }
+    return yy;
+}
+
+Eigen::MatrixXcd expM(Eigen::MatrixXd M,int &dim)
+{
+    Eigen::MatrixXcd res,ev;
+    Eigen::EigenSolver<MatrixXd> es(M);
+    ev = Eigen::MatrixXcd::Zero(dim,dim);
+    int i;
+    for(i=0; i<dim; i++)
+    {
+        ev(i,i) = exp(es.eigenvalues()[i]);
+    }
+    Eigen::MatrixXcd V = es.eigenvectors();
+    res = V*ev*V.inverse();
+    return res;
 }
 
 
-void facB(int &pid,pair <double,double> &fac,double const &T)
+void initialize(param_t &pp)
 {
-    std::string pname = f_G[pid].name;
-    vector<pair <size_t,double>> pp;
+    ParticleData pdata;
     
-    double sp = geffT(T)*2*pow(M_PI,2.)/45.;
+    pdata.loadFile("script/test.json");
     
-    double Ne = 0.,Nu = 0.,Nd = 0.;
+    procL = pdata.getProcessesFromQNumberViolation("L");
+    procQ = pdata.getProcessesFromQNumberConservation("Q");
     
-    for(auto &mm : ml)
-        Ne += (T>mm) ? 1. : 0.;
+    Xptl.clear();
+    SMptl.clear();
     
-    for(auto &mm : muq)
-        Nu += (T>mm) ? 1. : 0.;
+    multimap< double, std::string> tmp_map;
     
-    for(auto &mm : mdq)
-        Nd += (T>mm) ? 1. : 0.;
-    
-    double mu_u = 0.,mu_d = 0.;
-    
-    mu_u += (T>100.) ? -10./28. : 6.*(1./3. + 0.5/Nd + 0.5/Ne)/(1. + 3.*Nu/Ne + Nu/Nd + 2.*Nu);
-    
-    
-    mu_d += (T>100.) ? 38./28.: 6.*(1. - 1./3.*Nu*mu_u)/(2.*Nd);
-    
-    double mu_l += (T>100.) ? 1 : 0.;
-    
-    size_t found = pname.find("le");
-    while (found!=std::string::npos)
-    {
-        pp.push_back(make_pair(found,1.));
-        found = pname.find("le",found+1);
+    std::vector<std::string> ptlth = pdata.getParticleNames();
+    for (const auto &name : ptlth) {
+        if(pdata.getQuantumNumberValue("Th", name).getValue()>0)
+        {
+            //Xptl.push_back(name);
+            tmp_map.insert({ Massp(name,pp),name});
+        }
+        if(pdata.getQuantumNumberValue("Th", name).getValue()<1)
+        {
+            SMptl.push_back(name);
+        }
+        ptlmap.insert({ name, Massp(name,pp) });
     }
     
-    found = pname.find("lmu");
-    while (found!=std::string::npos)
-    {
-        pp.push_back(make_pair(found,1));
-        found = pname.find("lmu",found+1);
+    for(auto it = tmp_map.rbegin(); it != tmp_map.rend(); ++it)Xptl.push_back(it->second);
+    
+    for (const auto &name : ptlth) gptl.insert({ name,  pdata.getQuantumNumberValue("gg", name).getValue()});
+
+    vector<double> mass_scale;
+    
+    for(auto &name : Xptl) mass_scale.push_back(ptlmap[name]);
+    
+    Mscale = *max_element(mass_scale.begin(), mass_scale.end());
+    
+    int nn = Xptl.size();
+    GamQa = Eigen::MatrixXi::Zero(nn,nn);
+    GamQb = Eigen::MatrixXi::Zero(nn,nn);
+    GamLa = Eigen::MatrixXi::Zero(nn,nn);
+    GamLb = Eigen::MatrixXi::Zero(nn,nn);
+    
+    std::cout << "This is matrix GamQ :" << std::endl << GamQa << std::endl;
+    
+    double epoch1 = Mscale*0.1, epoch2 = Mscale, epoch = 10.*Mscale;
+    /*
+    multimap< double, int> scatta,scattb;
+    for(size_t ii = 0;ii!=Xptl.size();++ii){
+        for(size_t jj = 0;jj!=Xptl.size();++jj){
+            
+            std::cout << "X["<<ii<<"]["<<jj<<"]" << std::endl;
+            for(const auto &prname : procQ){
+                int N_proc = prname.inParticles.size();
+                if(N_proc>1){
+                    if((prname.inParticles[0].name.find(Xptl[ii]) != std::string::npos)&&(prname.inParticles[1].name.find(Xptl[jj] ) != std::string::npos))
+                    {
+                        int id;
+                        findAmp(prname.name,id);
+                        double Xsec = 0.;
+                        double iter = 0;
+                        do{
+                            double TT = Mscale*pow(10.,-1. + iter);
+                            double zz = pow(10.,-1. + iter);
+                            double Hb = sqrt(4.*pow(M_PI,3.)*geffT(TT)/45.)*pow(TT,2.)/mpl;
+                            
+                            double s = geffT(TT)*2*pow(M_PI,2.)/45.*pow(TT,3.);
+                            
+                            complex<double> pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                            Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? pr.real() : 0.;
+                            iter = iter + 1.;
+                        }while(iter<3.);
+                        scatta.insert({ Xsec,id});
+                        std::cout << "Xsec : " << Xsec << " id: " << id << " N_proc = " << N_proc << std::endl;
+                        
+                    }
+                    
+                    if((prname.inParticles[0].name.find(Xptl[ii]) != std::string::npos)&&(prname.outParticles[1].name.find(Xptl[jj] ) != std::string::npos))
+                    {
+                        int id;
+                        findAmp(prname.name,id);
+                        double Xsec = 0.;
+                        double iter = 0;
+                        do{
+                            double TT = Mscale*pow(10.,-1. + iter);
+                            double zz = pow(10.,-1. + iter);
+                            double Hb = sqrt(4.*pow(M_PI,3.)*geffT(TT)/45.)*pow(TT,2.)/mpl;
+                            
+                            double s = geffT(TT)*2*pow(M_PI,2.)/45.*pow(TT,3.);
+                            
+                            complex<double> pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                            Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? pr.real() : 0.;
+                            iter = iter + 1.;
+                        }while(iter<3.);
+                        scattb.insert({ Xsec,id});
+                        std::cout << "Xsec : " << Xsec << " id: " << id << " N_proc = " << N_proc << std::endl;
+                        std::cout << " Process : " << prname.name << std::endl;
+                    }
+                    
+                }
+                
+                
+            }
+            
+            if(!scatta.empty()){
+                std::cout << " Answer: " << scatta.rbegin()->second << std::endl;
+                GamQa(ii,jj) = scatta.rbegin()->second;
+                std::cout << "GamQa["<<ii<<"]["<<jj<<"] = " << GamQa(ii,jj) << std::endl;
+                scatta.clear();
+            }
+            if(!scattb.empty()){
+                std::cout << " Answer: " << scattb.rbegin()->second << std::endl;
+                GamQb(ii,jj) = scattb.rbegin()->second;
+                std::cout << "GamQb["<<ii<<"]["<<jj<<"] = " << GamQb(ii,jj) << std::endl;
+                scattb.clear();
+            }
+            
+        }
     }
-    
-    found = pname.find("XX");
-    while (found!=std::string::npos)
-    {
-        pp.push_back(make_pair(found,0.));
-        found = pname.find("XX",found+1);
-    }
-    found = pname.find("to");
-    
-    double in = 0.,out = 0.;
-    for(auto & pv : pp)
-    {
-        (pv.first<found) ? in+=pv.second : out+=pv.second;
-    }
-    
-    fac = (pid < ((int) f_G.size())) ? make_pair(in,out) : make_pair(0.,0.);
-    
+    std::cout << "Now, This is matrix GamQ :" << std::endl << GamQa << std::endl;
+    */
 }
- */
 
 Eigen::MatrixXcd Mass(Eigen::VectorXcd &th,Eigen::VectorXcd &mm)
 {
@@ -142,150 +262,9 @@ Eigen::MatrixXcd Mass(Eigen::VectorXcd &th,Eigen::VectorXcd &mm)
     
     temp = O12 * O13 * O23;
     
-    //res = temp.inverse() * MM * temp;
     
     res = (temp.conjugate()).transpose() * MM * temp;
     
-    return res;
-}
-
-//=====================================================================
-
-complex_t Complex(int const &x,double const &y)
-{
-    return x + y*1i;
-}
-/*
-std::string Prname(vector<std::string> const &ptln,int const &inp,int const &outp)
-{
-    std::string res = "CP";
-    
-    if(inp+outp ==((int) ptln.size()))
-    {
-        for (int ii = 0; ii<inp; ii++)
-        {
-            res += sp + ptln[ii] ;
-        }
-        res += sp + to;
-        for (int ii = inp; ii<inp+outp; ii++)
-        {
-            res += sp + ptln[ii];
-        }
-    }
-    return res;
-}
-*/
-
-double geffT(double x)
-{
-    int size = temp.size();
-    
-    int i = 0;                                                                  // find left end of interval for interpolation
-    if ( x >= temp[size - 2] )                                                 // special case: beyond right end
-    {
-        i = size - 2;
-    }
-    else
-    {
-        while ( x > temp[i+1] ) i++;
-    }
-    double xL = temp[i], yL = geff[i], xR = geff[i+1], yR = geff[i+1];      // points on either side (unless beyond ends)
-    if ( x < xL ) yR = yL;
-    if ( x > xR ) yL = yR;
-    
-    
-    double dydx = ( yR - yL ) / ( xR - xL );                                    // gradient
-    
-    return yL + dydx * ( x - xL );                                              // linear interpolation
-}
-
-double Massp(std::string name,param_t &pp)
-{
-    double mi;
-    std::string ptl_mass = "m_";
-    
-    bool cm0 = false;
-    for(const auto &m0 : Massless){
-        if((name==m0)||(name==m0+"c"))
-        {
-            cm0 = true;
-            
-        }
-    }
-    if(cm0)
-    {
-        mi = 0.;
-    }
-    else{
-        auto pt_mass = pp.realParams[ptl_mass + name];
-        mi = *pt_mass;
-        
-    }
-    
-    return mi;
-}
-
-double Yeq(std::string name,param_t &pp,double T)
-{
-    double yy = 0.;
-    double mi = Massp(name,pp);
-    double gi = 1.;
-    for(const auto &ga : gptl){
-        gi *= (name==ga.first) ? ga.second : 1.;
-        //std::cout << "name = " << ga.first << std::endl;
-    }
-    if(mi>0.)
-    {
-        yy = 45.*gi/geffT(T)*pow(mi/(2.*M_PI*T),2.)*cyl_bessel_k(2, mi/T);
-    }
-    if(mi==0.)
-    {
-        yy = 45./2.*gi/geffT(T)*pow(M_PI,-4.); //cout << "h1!!" << endl;
-    }
-    return yy;
-}
-/*
-
-double nthermalD(vector<pair <std::string,double>> sg,std::string str)
-{
-    double decay = 0.;
-    
-    for(auto &data : sg){
-        if(data.first==str) {
-            decay = data.second;
-        }
-    }
-    //cout << "Decay nth : =" << decay << endl;
-    return decay;
-}
-*/
-
-
-
-
-Eigen::MatrixXcd expM(Eigen::MatrixXd M,int &dim)
-{
-    Eigen::MatrixXcd res,ev;
-    //Eigen::MatrixXcd evt;
-    
-    Eigen::EigenSolver<MatrixXd> es(M);
-    
-    //cout << "es : " << es.eigenvalues().transpose() << endl << endl;
-    ev = Eigen::MatrixXcd::Zero(dim,dim);
-    //evt = Eigen::MatrixXcd::Zero(dim,dim);
-    //cout << "ev : " << endl << ev << endl << endl;
-    int i;
-    for(i=0; i<dim; i++)
-    {
-        ev(i,i) = exp(es.eigenvalues()[i]);
-        //evt(i,i) = es.eigenvalues()[i];
-    }
-    //cout << "ev : " << endl << ev << endl << endl;
-    Eigen::MatrixXcd V = es.eigenvectors();
-    
-    //cout << "evt : " << endl << V*evt*V.inverse() << endl << endl;
-    //cout << "M : " << endl << M << endl << endl;
-    res = V*ev*V.inverse();
     return res;
 }
 
@@ -295,31 +274,31 @@ complex_t L(complex_t xx,complex_t yy,complex_t zz)
     return xx*xx + yy*yy + zz*zz - 2.*xx*yy - 2.*xx*zz - 2.*yy*zz;
 }
 
-double jac(complex_t sqss,Eigen::VectorXcd &mm,vector<double> const &rr,int const &intp,int const &outp)
+double jac(complex_t sqss,Eigen::VectorXd &mm,vector<double> const &rr,int const &intp,int const &outp)
 {
-    double res;
+    double res = 0.;
     if((intp==1)&&(outp==3)){
-        double mD = mm(0).real();
-        double m1 = mm(1).real();
-        double m2 = mm(2).real();
-        double m3 = mm(3).real();
+        double mD = mm(0);
+        double m1 = mm(1);
+        double m2 = mm(2);
+        double m3 = mm(3);
         double s23 = pow(m2 + m3 + (-m1 - m2 - m3 + mD)*rr[0],2.);
         
         res = ((mD - m1 - m2 - m3) > 0.) ? 0.5/mD*1./(4.*M_PI)*sqrt(L(mD*mD,m1*m1,s23).real())/(8.*M_PI*mD*mD)*sqrt(L(s23,m2*m2,m3*m3)).real()/(8.*M_PI*s23) : 0.;
     }
     if((intp==1)&&(outp==2)){
-        double mD = mm(0).real();
-        double m1 = mm(1).real();
-        double m2 = mm(2).real();
+        double mD = mm(0);
+        double m1 = mm(1);
+        double m2 = mm(2);
         
         res = ((mD - m1 - m2) > 0.) ? 1./(16.*M_PI*pow(mD,3.))*sqrt(L(mD*mD,m1*m1,m2*m2)).real() : 0.;
     }
     if((intp==2)&&(outp==2)){
         complex_t ss = pow(sqss,2.);
-        double ma = mm(0).real();
-        double mb = mm(1).real();
-        double m2 = mm(2).real();
-        double m3 = mm(3).real();
+        double ma = mm(0);
+        double mb = mm(1);
+        double m2 = mm(2);
+        double m3 = mm(3);
         
         res = 1./(64.*M_PI*M_PI*ss.real())*sqrt(L(ss,m2*m2,m3*m3)).real()/sqrt(L(ss,ma*ma,mb*mb)).real();
     }
@@ -327,7 +306,7 @@ double jac(complex_t sqss,Eigen::VectorXcd &mm,vector<double> const &rr,int cons
 }
 
 
-Eigen::MatrixXcd pmom(complex_t sqss,Eigen::VectorXcd &mm,vector<double> const &cthz,vector<double> const &rr,int const &inp, int const &outp)
+Eigen::MatrixXcd pmom(complex_t sqss,Eigen::VectorXd &mm,vector<double> const &cthz,vector<double> const &rr,int const &inp, int const &outp)
 {
     Eigen::MatrixXcd res(inp+outp,inp+outp);
     
@@ -337,10 +316,10 @@ Eigen::MatrixXcd pmom(complex_t sqss,Eigen::VectorXcd &mm,vector<double> const &
     
     if((inp==1)&&(outp==3))
     {
-        double mD = mm(0).real();
-        double m1 = mm(1).real();
-        double m2 = mm(2).real();
-        double m3 = mm(3).real();
+        double mD = mm(0);
+        double m1 = mm(1);
+        double m2 = mm(2);
+        double m3 = mm(3);
         double cth1 = cthz[0];
         double cth2 = cthz[1];
         
@@ -379,9 +358,9 @@ Eigen::MatrixXcd pmom(complex_t sqss,Eigen::VectorXcd &mm,vector<double> const &
         pmom[3].transpose() * pmom[0], pmom[3].transpose() * pmom[1], pmom[3].transpose() * pmom[2], pmom[3].transpose() * pmom[3];
     }
     if((inp==1)&&(outp==2)) {
-        double mD = mm(0).real();
-        double m1 = mm(1).real();
-        double m2 = mm(2).real();
+        double mD = mm(0);
+        double m1 = mm(1);
+        double m2 = mm(2);
         
         pmom[0] << mD, 0.,0.;
         pmom[1] << (pow(m1,2) - pow(m2,2) + pow(mD,2))/(2.*sqrt(pow(mD,2))),0,
@@ -397,10 +376,10 @@ Eigen::MatrixXcd pmom(complex_t sqss,Eigen::VectorXcd &mm,vector<double> const &
     }
     if((inp==2)&&(outp==2)) {
         double ss = pow(sqss.real(),2.);
-        double m1 = mm(0).real();
-        double m2 = mm(1).real();
-        double m3 = mm(2).real();
-        double m4 = mm(3).real();
+        double m1 = mm(0);
+        double m2 = mm(1);
+        double m3 = mm(2);
+        double m4 = mm(3);
         double cth = cthz[0];
         
         pmom[0] << ((1 + pow(m1,2.)/ss - pow(m2,2.)/ss)*sqrt(ss))/2.,0,-sqrt(L(ss,pow(m1,2.),pow(m2,2.)))/(2.*sqrt(ss))*1i;
@@ -432,86 +411,6 @@ void findAmp(std::string pname,int &id)
     
 }
 
-/*
-double ptlSM(std::string str)
-{
-    double res = 0.;
-    for (auto &chptl : chSM) {
-        res += (chptl.first == str) ? chptl.second : 0.;
-    }
-    return res;
-}
-
-double ptlB(std::string str)
-{
-    double res = 0.;
-    for (auto &chptl : chB) {
-        res += (chptl.first == str) ? chptl.second : 0.;
-    }
-    return res;
-}
-
-void nthDecay(vector<pair <std::string,double>> &sqDecay,param_t &pp)
-{
-    int pid;
-    double ch1,ch2,ch3,charge;
-    
-    std::string f1,f2;
-    for(size_t qq = 0;qq!=pnthSM.size();++qq)
-    {
-        double decay = 0.;
-        ch1 = ptlSM(pnthSM[qq]);
-        std::string squark = pnthSM[qq];
-        for(size_t qi = 0;qi!=pthSM.size();++qi){
-            for(size_t qj = 0;qj!=pthSM.size();++qj){
-                
-                ch2 = ptlSM(pthSM[qi]);
-                ch3 = ptlSM(pthSM[qj]);
-                
-                f1 = pthSM[qi];
-                f2 = pthSM[qj];
-                charge = ch1 - ch2 - ch3;
-                if (charge == 0) {
-                    vector<std::string> pn1;
-                    pn1.push_back(squark);
-                    pn1.push_back(f1);
-                    pn1.push_back(f2);
-                    //cout << endl << "Pr name = "<< Prname(pn1,1,2) << endl;
-                    findAmp(Prname(pn1,1,2),pid);
-                    decay += (pid<((int) f_G.size())) ? Decay(pid,pp).real() : 0.;
-                    
-                }
-            }
-            
-            for(size_t qj = 0;qj!=pXSM.size();++qj){
-                
-                ch2 = ptlSM(pthSM[qi]);
-                ch3 = ptlSM(pXSM[qj]);
-                
-                f1 = pthSM[qi];
-                f2 = pXSM[qj];
-                
-                charge = ch1 - ch2 - ch3;
-                if (charge == 0) {
-                    vector<std::string> pn2;
-                    pn2.push_back(squark);
-                    pn2.push_back(f1);
-                    pn2.push_back(f2);
-                    //cout << endl << "Pr name = "<< Prname(pn2,1,2) << endl;
-                    findAmp(Prname(pn2,1,2),pid);
-                    decay += (pid<((int)f_G.size())) ? Decay(pid,pp).real() : 0.;
-                }
-                
-            }
-        }
-        sqDecay.push_back(std::make_pair(squark,decay));
-        //cout << "Decay of sq[ "<< "]"<< qq <<" = "<< squark << " = " << decay << endl;
-    }
-    
-    
-}
- */
-
 double epsilon1(std::string ll,std::string ptl,param_t &pp)
 {
     std::vector<Process> procL;
@@ -530,57 +429,15 @@ double epsilon1(std::string ll,std::string ptl,param_t &pp)
         if((in_proc<2)&&(out_proc>1)){
             if(prc.inParticles[0].name.find(ptl)!=std::string::npos){
                 
-                complex_t decay = 0.;
                 Eigen::MatrixXcd pmat(1+out_proc,1+out_proc);
-                Eigen::VectorXcd mass(1+out_proc);
                 
                 vector<double> mmax;
-                size_t tt_max = prc.inParticles.size() + prc.outParticles.size();
-                size_t tt = 0;
-                bool cm0 = false;
-                for(const auto &prname : prc.inParticles){
-                    for(const auto &m0 : Massless){
-                        if((prname.name.find(m0)!=std::string::npos))
-                        {
-                            cm0 = true;
-                        }
-                    }
-                    if(cm0)
-                    {
-                        //std::cout << "Mass of Photon "<< prname.name << " = 0" << std::endl;
-                        mass(tt) = 0.;
-                    }
-                    else{
-                        auto pt_mass = pp.realParams[ptl_mass + prname.name];
-                        //std::cout << "Mass of "<< prname.name << " = " << *pt_mass << std::endl;
-                        mmax.push_back(*pt_mass);
-                        mass(tt) = *pt_mass;
-                        
-                    }
-                    ++tt;
-                }
+                for(const auto &prname : prc.inParticles)mmax.push_back(ptlmap[prname.name]);
                 
-                for(const auto &prname : prc.outParticles){
-                    for(const auto &m0 : Massless){
-                        if((prname.name.find(m0)!=std::string::npos))
-                        {
-                            cm0 = true;
-                        }
-                    }
-                    if(cm0)
-                    {
-                        //std::cout << "Mass of Photon "<< prname.name << " = 0" << std::endl;
-                        mass(tt) = 0.;
-                    }
-                    else{
-                        auto pt_mass = pp.realParams[ptl_mass + prname.name];
-                        //std::cout << "Mass of "<< prname.name << " = " << *pt_mass << std::endl;
-                        mmax.push_back(*pt_mass);
-                        mass(tt) = *pt_mass;
-                        
-                    }
-                    ++tt;
-                }
+                for(const auto &prname : prc.outParticles)mmax.push_back(ptlmap[prname.name]);
+                
+                Eigen::VectorXd mass = Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(mmax.data(), mmax.size());
+                
                 
                 vector<double> cth,rr;
                 cth.push_back(1.);
@@ -594,37 +451,25 @@ double epsilon1(std::string ll,std::string ptl,param_t &pp)
                 if(prc.name.find("AsymL")!=std::string::npos){
                     findAmp(prc.name,pid);
                     if(DeltaL==1){
-                        //std::cout << " Process = " << prc.name << std::endl;
-                        //std::cout << " Qnumber  = " << prc.qNumbers.begin()->second << std::endl;
                         ampLp += f_G[pid](pp);
-                        //std::cout << "Ampl Loop P = " << ampLp << std::endl;
                     }
                 }
                 if(prc.name.find("AsymT")!=std::string::npos){
                     findAmp(prc.name,pid);
                     if(DeltaL==1){
-                        //std::cout << " Process = " << prc.name << std::endl;
-                        //std::cout << " Qnumber  = " << prc.qNumbers.begin()->second << std::endl;
                         tree += f_G[pid](pp);
-                        //std::cout << "Ampl Tree P = " << tree << std::endl;
                     }
                 }
                 if(prc.name.find("AsymL")!=std::string::npos){
                     findAmp(prc.name,pid);
                     if(DeltaL==-1){
-                        //std::cout << " Process = " << prc.name << std::endl;
-                        //std::cout << " Qnumber  = " << prc.qNumbers.begin()->second << std::endl;
                         ampLap += f_G[pid](pp);
-                        //std::cout << "Ampl Loop AP = " << ampLap << std::endl;
                     }
                 }
                 if(prc.name.find("AsymT")!=std::string::npos){
                     findAmp(prc.name,pid);
                     if(DeltaL==-1){
-                        //std::cout << " Process = " << prc.name << std::endl;
-                        //std::cout << " Qnumber  = " << prc.qNumbers.begin()->second << std::endl;
                         tree += f_G[pid](pp);
-                        //std::cout << "Ampl Tree P = " << tree << std::endl;
                     }
                 }
             }
@@ -641,74 +486,19 @@ complex_t Decay(int &pid,param_t &pp,Process prc,int loop)
     
     std::string pname = f_G[pid].name;
     std::string ptl_mass = "m_";
-    //std::cout << "Name =" << pname << std::endl;
-    size_t found;
-    double pmass;
     int out = prc.outParticles.size();
     
-    /*
-    for(size_t tt = 0;tt!=vect_ptl.size();++tt){
-        (vect_ptl[tt].first<pname.find("to")) ? in++ : out++;
-        std::cout << ">" << vect_ptl[tt].second << std::endl;
-    }
-    */
-    //std::cout << "The process is 1->" << out << std::endl;
     
     complex_t jacD = 0.,decay = 0.;
     Eigen::MatrixXcd pmat(1+out,1+out);
-    Eigen::VectorXcd mass(1+out);
-    
     
     vector<double> mmax;
-    size_t tt_max = prc.inParticles.size() + prc.outParticles.size();
-    size_t tt = 0;
-    bool cm0 = false;
-    for(const auto &prname : prc.inParticles){
-        for(const auto &m0 : Massless){
-            if((prname.name.find(m0)!=std::string::npos))
-            {
-                cm0 = true;
-            }
-        }
-        if(cm0)
-        {
-            //std::cout << "Mass of Photon "<< prname.name << " = 0" << std::endl;
-            mass(tt) = 0.;
-        }
-        else{
-            auto pt_mass = pp.realParams[ptl_mass + prname.name];
-            //std::cout << "Mass of "<< prname.name << " = " << *pt_mass << std::endl;
-            mmax.push_back(*pt_mass);
-            mass(tt) = *pt_mass;
-            
-        }
-        ++tt;
-    }
+    for(const auto &prname : prc.inParticles) mmax.push_back(ptlmap[prname.name]);
     
-    for(const auto &prname : prc.outParticles){
-        for(const auto &m0 : Massless){
-            if((prname.name.find(m0)!=std::string::npos))
-            {
-                cm0 = true;
-            }
-        }
-        if(cm0)
-        {
-            //std::cout << "Mass of Photon "<< prname.name << " = 0" << std::endl;
-            mass(tt) = 0.;
-        }
-        else{
-            auto pt_mass = pp.realParams[ptl_mass + prname.name];
-            //std::cout << "Mass of "<< prname.name << " = " << *pt_mass << std::endl;
-            mmax.push_back(*pt_mass);
-            mass(tt) = *pt_mass;
-            
-        }
-        ++tt;
-    }
+    for(const auto &prname : prc.outParticles) mmax.push_back(ptlmap[prname.name]);
     
+    Eigen::VectorXd mass = Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(mmax.data(), mmax.size());
     
-    //cout << "The Masses are: "<< endl << mass  << endl;
     if(out==3){
         decay = 0.;
         for(int ii = 0;ii<13;ii++){
@@ -728,12 +518,6 @@ complex_t Decay(int &pid,param_t &pp,Process prc,int loop)
                     pp.s_34 = pmat(2,3).real();
                     
                     jacD = jac(mass(0),mass,rr,1,out);
-                    /*
-                     for(int ll=0; ll!=f_G.size();++ll){
-                     if(f_G[ll].name == pname){
-                     decay += f_G[ll](pp)*jacD*as[jj]*as[kk]*as1[ii];
-                     }
-                     }*/
                     
                     if(loop==0){
                         if(f_G[pid].name.find("Tree")!=std::string::npos){
@@ -745,7 +529,6 @@ complex_t Decay(int &pid,param_t &pp,Process prc,int loop)
                             decay += f_G[pid](pp)*jacD*as[jj]*as[kk]*as1[ii];
                         }
                     }
-                    //cout << "AMp : " << f_G[pid].name << " : " << f_G[pid](pp) << endl;
                 }
             }
         }
@@ -761,15 +544,6 @@ complex_t Decay(int &pid,param_t &pp,Process prc,int loop)
         pp.s_23 = pmat(1,2).real();
         
         jacD = jac(mass(0),mass,rr,1,out);
-        
-        //std::cout << "jac = " << jacD << std::endl;
-        //std::cout << "Proc = " << f_G[pid].name << std::endl;
-        //pp.print();
-        /*
-         for(int kk=0; kk!=f_G.size();++kk){
-         if(f_G[kk].name == pname){
-         decay += f_G[kk](pp)*jacD;}
-         }*/
         
         if(loop==0){
             if(f_G[pid].name.find("Tree")!=std::string::npos){
@@ -799,77 +573,18 @@ double gamma(int &pid,double const &T,param_t &data,Process prc,int loop)
     std::string pname = f_G[pid].name;
     std::string ptl_mass = "m_";
     
-    //std::cout << "Name =" << pname << std::endl;
-    double pmass;
-        
     int in = prc.inParticles.size(),out = prc.outParticles.size();
-    /*
-    for(int tt = 0;tt!=vect.size();++tt){
-        (vect[tt].first<pname.find("to")) ? in++ : out++;
-        
-    }
-    */
-    size_t found;
     
-    for(const auto &inpp : prc.inParticles)
-    {
-        for(auto &gi : gptl){
-            gg *= (inpp.name == gi.first) ? gi.second : 1.;
-        }
-    }
-    
-    
-    Eigen::MatrixXcd pmat(in+out,in+out);
-    Eigen::VectorXcd mass(in+out);
+    for(const auto &inpp : prc.inParticles) gg *= gptl[inpp.name];
     
     vector<double> mmax;
-    size_t tt_max = prc.inParticles.size() + prc.outParticles.size();
-    size_t tt = 0;
-    bool cm0 = false;
-    for(const auto &prname : prc.inParticles){
-        for(const auto &m0 : Massless){
-            if((prname.name==m0)||(prname.name==m0+"c"))
-            {
-                cm0 = true;
-            }
-        }
-        if(cm0)
-        {
-            //std::cout << "Mass of Photon "<< prname.name << " = 0" << std::endl;
-            mass(tt) = 0.;
-        }
-        else{
-            auto pt_mass = data.realParams[ptl_mass + prname.name];
-            //std::cout << "Mass of "<< prname.name << " = " << *pt_mass << std::endl;
-            mmax.push_back(*pt_mass);
-            mass(tt) = *pt_mass;
-            
-        }
-        ++tt;
-    }
+    for(const auto &prname : prc.inParticles)mmax.push_back(ptlmap[prname.name]);
     
-    for(const auto &prname : prc.outParticles){
-        for(const auto &m0 : Massless){
-            if((prname.name==m0)||(prname.name==m0+"c"))
-            {
-                cm0 = true;
-            }
-        }
-        if(cm0)
-        {
-            //std::cout << "Mass of Photon "<< prname.name << " = 0" << std::endl;
-            mass(tt) = 0.;
-        }
-        else{
-            auto pt_mass = data.realParams[ptl_mass + prname.name];
-            //std::cout << "Mass of "<< prname.name << " = " << *pt_mass << std::endl;
-            mmax.push_back(*pt_mass);
-            mass(tt) = *pt_mass;
-            
-        }
-        ++tt;
-    }
+    for(const auto &prname : prc.outParticles)mmax.push_back(ptlmap[prname.name]);
     
+    Eigen::MatrixXcd pmat(in+out,in+out);
+    
+    Eigen::VectorXd mass = Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(mmax.data(), mmax.size());
     
     if((in==2)&&(out==2)){
         
@@ -886,7 +601,6 @@ double gamma(int &pid,double const &T,param_t &data,Process prc,int loop)
         int ii,jj;
         double jac = 0.,mi=0.,mj=0.;
         complex_t amp = 0.;
-        //cout << " ma = " << ma << " mb = " << mb << " m1 = " << m1 << " m2 = " << m2 << endl << endl;
         if((pow(ma+mb, 2.))>=(pow(m1+m2, 2.)))
         {
             mi=ma;
@@ -920,11 +634,6 @@ double gamma(int &pid,double const &T,param_t &data,Process prc,int loop)
                 
                 jac = gg*pow(ms,4.)*2.*mi*mj*aki[ii]*as[jj];//*(1./(pow(xs1[ii] - 1.,2.)));
                 amp = 0.;
-                /*
-                 for(int kk=0; kk!=f_G.size();++kk){
-                 if(f_G[kk].name == pname){
-                 amp += f_G[kk](data)*jac;}
-                 }*/
                 if(loop==0){
                     if(f_G[pid].name.find("Tree")!=std::string::npos){
                         amp += f_G[pid](data)*jac;
@@ -946,38 +655,107 @@ double gamma(int &pid,double const &T,param_t &data,Process prc,int loop)
     {
         complex_t decay = Decay(pid,data,prc,loop);
         
-        double mD = mass(0).real();
+        double mD = mass(0);
         result = gg*mD*mD/(2.*pow(M_PI,2.))*T*cyl_bessel_k(1, abs(mD)/T)*decay.real();
     }
-    //cout << "\n  Res = " << result << endl;
     return result;
 }
 
-void BESolver(std::ofstream &ofile,param_t &pp)
+
+
+double washout(double zz,param_t &pp,std::string name)
 {
-    std::vector<Process> procL,procQ;
-    
-    ParticleData pdata;
-    
-    pdata.loadFile("script/test.json");
-    
-    int N_proc;
-    int out_proc;
-    std::cout << "Process for L != 0" << std::endl;
-    procL = pdata.getProcessesFromQNumberViolation("L");
-    procQ = pdata.getProcessesFromQNumberConservation("Q");
+    double TT = Mscale/zz;
+    //std::cout << "TT = " << TT << std::endl;
+    double Hb = sqrt(4.*pow(M_PI,3.)*geffT(TT)/45.)*pow(TT,2.)/mpl;
+    double sT = geffT(TT)*2*pow(M_PI,2.)/45.;
+    double yeql = 4./pow(M_PI,2.)*pow(sT,-1.);
+    double s = geffT(TT)*2*pow(M_PI,2.)/45.*pow(TT,3.);
     int id = 0;
-    int DeltaL1 = 1,DeltaL2 = 2;
-    double gammaL1 = 0.,gammaL2 = 0.;
     
-    vector<double> mass_scale;
+    double gammaQ = 0.;
+    double result = 0.;
     
-    for(auto &name : Xptl){
-        mass_scale.push_back(Massp(name,pp));
+    if(name.find("L")!= std::string::npos)
+    {
+        for(const auto &prname : procL)
+        {
+            findAmp(prname.name,id);
+            int DeltaL = prname.qNumbers.begin()->second;
+            double gamma_temp = gamma(id,TT,pp,prname,0);
+            result += (DeltaL>0) ? DeltaL*gamma_temp/(s*Hb*zz*yeql) : 0.;
+        }
+    }
+    if(name.find("Q")!= std::string::npos)
+    {
+        for(const auto &prname : procQ){
+            findAmp(prname.name,id);
+            if((prname.name.find("Tree")!=std::string::npos)){
+                double gamma_temp = gamma(id,TT,pp,prname,0);
+                gammaQ += gamma_temp;
+            }
+        }
+        result = gammaQ/(s*Hb*zz);
     }
     
-    double Mscale = *max_element(mass_scale.begin(), mass_scale.end());;
-    size_t nn = Xptl.size() + 1;
+    
+    
+    return result;
+    
+}
+
+double bisection(double a, double b,double z_cut,param_t &pp,std::string name)
+{
+    double fa,fb,fc;
+    
+    fa = washout(pow(10.,a),pp,name) - z_cut;
+    
+    fb = washout(pow(10.,b),pp,name) - z_cut;
+    
+    if (fa * fb >= 0) {
+        //cout << "You have not assumed right a and b\n";
+        return 0;
+    }
+    double cc = a;
+    while ((b-a) >= EP) {
+        // Find middle point
+        cc = (a+b)/2;
+        // Check if middle point is root
+        fc = washout(pow(10.,cc),pp,name) - z_cut;
+        if (fc == 0.0)
+            break;
+        // Decide the side to repeat the steps
+        else if (fc*fa < 0)
+            b = cc;
+        else
+            a = cc;
+    }
+    //cout << "The value of root is : " << cc << endl;
+    
+    return cc;
+}
+
+
+double freezeout(param_t &pp)
+{
+    
+    double steps = 40.;
+    double sph = 28./79.;
+    double hh = 4./steps;
+    
+    double TT;
+    int id = 0;
+    double zi = 0.;
+    double zz_in = pow(10.,bisection(-1., 2.,1.,pp,"L"));//zi;
+    double zz_out = pow(10.,bisection(-1., 2.,1.E-03,pp,"L"));//zi;Mscale/100.;//
+     
+    double tolerance = 0.;//1.E-05;
+    std::cout << "Wash-out L :: " << zz_in << std::endl;
+    std::cout << "Wash-out L 1.E-3 :: " << zz_out << std::endl;
+    int N_proc;
+    int out_proc;
+    
+    size_t nn = Xptl.size();
     
     Eigen::VectorXcd yn(nn),eps1(Xptl.size());
     
@@ -985,24 +763,257 @@ void BESolver(std::ofstream &ofile,param_t &pp)
     
     Eigen::VectorXcd tempf(nn),bth(nn),yth(nn),ypth(nn),yeq(nn);
     
+    complex<double> a_asym,b_asym ,temp_asym, y_asym,yp_asym, y_temp;
+    
     Eigen::MatrixXcd tempfp(nn,nn),athinv(nn,nn),exath(nn,nn);
     Eigen::MatrixXd ath(nn,nn);
     
-    Eigen::MatrixXcd Gam2(nn,nn);
-    Eigen::VectorXcd Gam1(nn);
+    yn = Eigen::VectorXcd::Zero(nn);
+    yn << 0.,0.,0.,0.;
     
+    y_asym = 0.;
+    
+    double eps = epsilon1("L","N_3",pp);
+    double factor = sph/(8.6E-11);
+    double YeqN3 = Yeq("N_3",Mscale/zz_out);
+    std::cout << "asym = " << factor*eps*YeqN3 << std::endl;
+    //for(const auto &Xn : Xptl) std::cout << "X>> " << Xn << std::endl;
+    
+    for(const auto &Xn : SMptl) std::cout << "SM>> " << Xn << std::endl;
+    
+    for(size_t it = 0;it!=Xptl.size();++it) std::cout << "X["<<it<<"] ="<< Xptl[it] << std::endl;
+    
+    hh = (log10(zz_out) - log10(zz_in))/steps;
+    
+    zi = 0.;
+    do{
+        double zz = pow(10., log10(zz_in) + hh*zi);
+        TT = Mscale/zz;
+        
+        complex<double> Xsec = 0., pr = 0.;
+        
+        double Hb = sqrt(4.*pow(M_PI,3.)*geffT(TT)/45.)*pow(TT,2.)/mpl;
+        double sT = geffT(TT)*2*pow(M_PI,2.)/45.;
+        double yeql = 4./pow(M_PI,2.)*pow(sT,-1.);
+        double s = geffT(TT)*2*pow(M_PI,2.)/45.*pow(TT,3.);
+        
+        tempf = Eigen::VectorXcd::Zero(nn);
+        tempfp = Eigen::MatrixXcd::Zero(nn,nn);
+        a_asym = 0.;
+        temp_asym = 0.;
+        
+        yth = yn;
+        y_temp = y_asym;
+        
+        size_t si = 0;
+        
+        auto k1byk2 = [&](const double& zx) { return zx/(1.5 + zx); };
+        
+        for(const auto &mname : Xptl){
+            yeq(si) = Yeq(mname,TT);
+            tempf(si) += (yth(si)+1.)*k1byk2(ptlmap[mname]/TT);
+            tempfp(si,si) += k1byk2(ptlmap[mname]/TT);
+            ++si;
+        }
+        
+        for(size_t ii = 0;ii!=Xptl.size();++ii){
+            for(size_t jj = 0;jj!=Xptl.size();++jj){
+                
+                for(const auto &prname : procQ){
+                    N_proc = prname.inParticles.size();
+                    if(N_proc>1){
+                        if((prname.inParticles[0].name.find(Xptl[ii]) != std::string::npos)&&(prname.inParticles[1].name.find(Xptl[jj] ) != std::string::npos))
+                        {
+                            Xsec = 0.;
+                            findAmp(prname.name,id);
+                            pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                            Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? pr : 0.;
+                        }
+                        tempf(ii) += -log(10)*zz/yeq(ii)*((yth(ii)*yth(jj) + yth(ii) + yth(jj))*Xsec);
+                        
+                        for(size_t kk = 0;kk!=Xptl.size();++kk){
+                            double del_ki = (kk==ii) ? 1. : 0;
+                            double del_kj = (kk==jj) ? 1. : 0;
+                            tempfp(ii,kk) += -log(10)*zz/yeq(ii)*(del_ki*yth(jj) + del_ki + del_kj + del_kj*yth(ii))*Xsec;
+                        }
+                    }
+                    
+                    for(const auto &pin : prname.inParticles){
+                        for(const auto &pout : prname.outParticles){
+                            if((pin.name.find(Xptl[ii]) != std::string::npos)&&(pout.name.find(Xptl[jj] ) != std::string::npos)){
+                                Xsec = 0.;
+                                
+                                findAmp(prname.name,id);
+                                pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                                
+                                Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? pr : 0.;
+                            }
+                        }
+                        tempf(ii) += -log(10)*zz/yeq(ii)*((yth(ii) - yth(jj))*Xsec);
+                        
+                        for(size_t kk = 0;kk!=Xptl.size();++kk){
+                            double del_ki = (kk==ii) ? 1. : 0;
+                            double del_kj = (kk==jj) ? 1. : 0;
+                            tempfp(ii,kk) += -log(10)*zz/yeq(ii)*((del_ki - del_kj)*Xsec);
+                        }
+                    }
+                    
+                }
+                for(const auto &prname : procL){
+                    complex<double> XsecL = 0.;
+                    
+                    //====================================
+                    double DeltaL = prname.qNumbers.begin()->second;
+                    N_proc = prname.inParticles.size();
+                    out_proc = prname.outParticles.size();
+                    if((N_proc<2)&&(out_proc<3)){
+                        for(const auto &outptl : prname.outParticles){
+                            if((prname.inParticles[0].name.find(Xptl[ii])!=std::string::npos)&&(outptl.name.find(Xptl[jj])!=std::string::npos)){
+                                Xsec = 0.;
+                                XsecL = 0.;
+                                findAmp(prname.name,id);
+                                pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                                Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? 0.5*abs(DeltaL)*pr : 0.;
+                                if(DeltaL>0){
+                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
+                                    XsecL += (!isnan(pr.real())) ? 2.*pr : 0.;
+                                }
+                                if(DeltaL<0){
+                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
+                                    XsecL -= (!isnan(pr.real())) ? 2.*pr : 0.;
+                                }
+                                temp_asym += log(10)*zz*((yth(ii) - yth(jj))*XsecL - y_temp/yeql*Xsec*(yth(jj) + 1.) );
+                                a_asym += -log(10)*zz/yeql*Xsec*(yth(jj) + 1.);
+                                
+                            }
+                        }
+                        
+                    }
+                    
+                    if((N_proc>1)&&(out_proc<3)){
+                        for(const auto &inptl : prname.inParticles){
+                            for(const auto &outptl : prname.outParticles){
+                                if((inptl.name.find(Xptl[ii]) != std::string::npos)&&(outptl.name.find(Xptl[jj]) != std::string::npos)){
+                                    Xsec = 0.;
+                                    XsecL = 0.;
+                                    
+                                    findAmp(prname.name,id);
+                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                                    Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? 0.5*abs(DeltaL)*pr : 0.;
+                                    /*
+                                     if(DeltaL>0){
+                                     pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
+                                     XsecL += (pr.real()>tolerance) ? 2.*pr : 0.;
+                                     }
+                                     if(DeltaL<0){
+                                     pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
+                                     XsecL -= (pr.real()>tolerance) ? 2.*pr : 0.;
+                                     }
+                                     
+                                     */
+                                    temp_asym += log(10)*zz*( (yth(ii) - yth(jj))*XsecL - y_temp/yeql*Xsec*(yth(ii) + yth(jj) + 2.));
+                                    a_asym += -log(10)*zz/yeql*Xsec*(yth(ii) + yth(jj) + 2.);
+                                    
+                                }
+                            }
+                        }
+                        
+                        for(const auto &inptl1 : prname.inParticles){
+                            for(const auto &inptl2 : prname.inParticles){
+                                if((inptl1.name.find(Xptl[ii]) != std::string::npos)&&(inptl2.name.find(Xptl[jj]) != std::string::npos)){
+                                    Xsec = 0.;
+                                    XsecL = 0.;
+                                    
+                                    findAmp(prname.name,id);
+                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                                    Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? 0.5*abs(DeltaL)*pr : 0.;
+                                    /*
+                                     if(DeltaL>0){
+                                     pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
+                                     XsecL += (pr.real()>tolerance) ? 2.*pr : 0.;
+                                     }
+                                     if(DeltaL<0){
+                                     pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
+                                     XsecL -= (pr.real()>tolerance) ? 2.*pr : 0.;
+                                     }
+                                     */
+                                    temp_asym += log(10)*zz*( (yth(ii)*yth(jj) + yth(ii) + yth(jj) + 1.)*XsecL - y_temp/yeql*Xsec);
+                                    a_asym += -log(10)*zz/yeql*Xsec;
+                                    
+                                }
+                            }
+                        }
+                        
+                        
+                    }
+                }
+                
+                    //======================================
+                
+            }
+        }
+
+        ath = tempfp.real();
+        bth = tempf - tempfp*yth;
+        
+        b_asym = temp_asym - a_asym*y_temp;
+        
+        int dim = Xptl.size();
+        
+        if((ath.determinant()!=0)&&(!isnan(ath.determinant()))&&(!isinf(ath.determinant())))
+        {
+            ypth = expM(ath*hh, dim)*yth + tempfp.inverse()*(expM(ath*hh, dim) -  MatrixXd::Identity(dim, dim))*bth;
+        }
+        else
+        {
+            ypth = yth + MatrixXd::Identity(dim, dim)*bth*hh;
+        }
+        
+        if(a_asym!=0.){
+            yp_asym = exp(a_asym*hh)*y_temp + 1./a_asym*(exp(a_asym*hh) - 1.)*b_asym;
+        }
+        if(a_asym==0.){
+            yp_asym = y_temp + b_asym*hh;
+        }
+        
+        yn = ypth;
+        y_asym = yp_asym;
+        //double washout_Q = washout(zz,pp,"Q");
+        double washout_L = washout(zz,pp,"L");
+        
+        std::cout << TT << "\t"<< zz << "\t" << washout_L << "\t" << sph*y_asym.real()/(8.6E-11) << std::endl;
+        ++zi;
+    }while(zi<=steps);//while((TT>=100.));//
+    
+    return sph*y_asym.real()/(8.6E-11);
+    
+}
+
+void BESolver(std::ofstream &ofile,param_t &pp)
+{
+    int N_proc;
+    int out_proc;
+    int id = 0;
+    int DeltaL1 = 1,DeltaL2 = 2;
+    
+    size_t nn = Xptl.size();
+    
+    Eigen::VectorXcd yn(nn),eps1(Xptl.size());
+    
+    Eigen::MatrixXcd eps2a(Xptl.size(),Xptl.size()),eps2b(Xptl.size(),Xptl.size());
+    
+    Eigen::VectorXcd tempf(nn),bth(nn),yth(nn),ypth(nn),yeq(nn);
+    
+    complex<double> a_asym,b_asym ,temp_asym, y_asym, yp_asym, y_temp;
+    
+    Eigen::MatrixXcd tempfp(nn,nn),athinv(nn,nn),exath(nn,nn);
+    Eigen::MatrixXd ath(nn,nn);
     
     yn = Eigen::VectorXcd::Zero(nn);
-    /*
-    size_t yi = 0;
-    for(const auto &mname : Xptl){
-        yn(yi) = Yeq(mname,pp,pp.m_N_3*10.);
-        ++yi;
-    }*/
-    //yn << 1.,1.,1.,1.,0.;
-    yn << 0.,0.,0.,0.,0.;
     
+    yn << 0.,0.,0.,0.;
     
+    y_asym = 0.;
     
     eps1 << epsilon1("L","N_3",pp),epsilon1("L","N_2",pp),epsilon1("L","N_1",pp),0.;
     
@@ -1019,25 +1030,22 @@ void BESolver(std::ofstream &ofile,param_t &pp)
 
     double steps = 1000.;
     double sph = 28./79.;
-    double hh = 3./steps;
-    double zi = 0.;
+    
+    double zi = 0.1;
     double TT;
-    double tolerance = 1.E-05;
+    double tolerance = 0.;//1.E-02;
+    double zz_in = zi;//pow(10.,bisection(-1., 2.,1.,pp,"Q"));//
+    double hh = (2. - log10(zz_in))/steps;
+    
+    std::cout << "Wash-out " << pow(10.,bisection(-1., 2.,1.,pp,"Q")) << std::endl;
+    //double hh = 2./steps;
     do{
-        double zz = pow(10., -1. + hh*zi);
+        double zz = pow(10., log10(zz_in) + hh*zi);
+        //double zz = pow(10., hh*zi);
         TT = Mscale/zz;
         
-        /*
-        std::cout << TT << " ";
-        for(const auto &mname : Xptl){
-            std::cout << Yeq(mname,pp,TT) << " ";
-        }
-        std::cout << std::endl;
-        */
         complex<double> Xsec = 0., pr = 0.;
         
-        gammaL1 = 0;
-        gammaL2 = 0.;
         double Hb = sqrt(4.*pow(M_PI,3.)*geffT(TT)/45.)*pow(TT,2.)/mpl;
         
         double s = geffT(TT)*2*pow(M_PI,2.)/45.*pow(TT,3.);
@@ -1048,211 +1056,157 @@ void BESolver(std::ofstream &ofile,param_t &pp)
         /**/
         tempf = Eigen::VectorXcd::Zero(nn);
         tempfp = Eigen::MatrixXcd::Zero(nn,nn);
-        
-        Gam1 = Eigen::VectorXcd::Zero(nn);
-        Gam2 = Eigen::MatrixXcd::Zero(nn,nn);
+        a_asym = 0.;
+        temp_asym = 0.;
         
         yth = yn;
+        
+        y_temp = y_asym;
+        
         
         size_t si = 0;
         
         auto k1byk2 = [&](const double& zx) { return zx/(1.5 + zx); };
         
         for(const auto &mname : Xptl){
-            yeq(si) = Yeq(mname,pp,TT);
-            //tempf(si) += (yth(si)+1.)*cyl_bessel_k(1, Massp(mname,pp)/TT)/cyl_bessel_k(2, Massp(mname,pp)/TT);
-            //tempfp(si,si) += cyl_bessel_k(1, Massp(mname,pp)/TT)/cyl_bessel_k(2, Massp(mname,pp)/TT);
-            tempf(si) += (yth(si)+1.)*k1byk2(Massp(mname,pp)/TT);
-            tempfp(si,si) += k1byk2(Massp(mname,pp)/TT);
+            yeq(si) = Yeq(mname,TT);
+            tempf(si) += (yth(si)+1.)*k1byk2(ptlmap[mname]/TT);
+            tempfp(si,si) += k1byk2(ptlmap[mname]/TT);
             ++si;
         }
         
-        //std::cout << "tempfp > " << tempf.transpose() << std::endl;
-        //std::cout << "tempfp > " << std::endl << tempfp << std::endl;
         std::cout << std::endl;
-        
-        yeq(nn-1) = yeql;
         
         for(size_t ii = 0;ii!=Xptl.size();++ii){
             for(size_t jj = 0;jj!=Xptl.size();++jj){
+                
                 for(const auto &prname : procQ){
                     N_proc = prname.inParticles.size();
                     if(N_proc>1){
-                        Xsec = 0.;
                         if((prname.inParticles[0].name.find(Xptl[ii]) != std::string::npos)&&(prname.inParticles[1].name.find(Xptl[jj] ) != std::string::npos))
                         {
+                            Xsec = 0.;
                             findAmp(prname.name,id);
                             pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                            Xsec += (pr.real()>tolerance*yeq(ii).real()) ? pr : 0.;
+                            //Xsec += (pr.real()>0.1*k1byk2(ptlmap[Xptl[ii]]/TT)*yeq(ii).real()) ? pr : 0.;
+                            Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? pr : 0.;
                         }
-                        
                         tempf(ii) += -log(10)*zz/yeq(ii)*((yth(ii)*yth(jj) + yth(ii) + yth(jj))*Xsec);
                         
                         for(size_t kk = 0;kk!=Xptl.size();++kk){
-                            
                             double del_ki = (kk==ii) ? 1. : 0;
                             double del_kj = (kk==jj) ? 1. : 0;
                             tempfp(ii,kk) += -log(10)*zz/yeq(ii)*(del_ki*yth(jj) + del_ki + del_kj + del_kj*yth(ii))*Xsec;
                         }
-                        
                     }
-                //}
-                //for(const auto &prname : procL){
+                    
                     for(const auto &pin : prname.inParticles){
                         for(const auto &pout : prname.outParticles){
                             if((pin.name.find(Xptl[ii]) != std::string::npos)&&(pout.name.find(Xptl[jj] ) != std::string::npos)){
                                 Xsec = 0.;
+                                
                                 findAmp(prname.name,id);
                                 pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                                Xsec += (pr.real()>tolerance*yeq(ii).real()) ? pr : 0.;
-                                
-                                tempf(ii) += -log(10)*zz/yeq(ii)*((yth(ii) - yth(jj))*Xsec);
-                                
-                                for(size_t kk = 0;kk!=Xptl.size();++kk){
-                                    double del_ki = (kk==ii) ? 1. : 0;
-                                    double del_kj = (kk==jj) ? 1. : 0;
-                                    tempfp(ii,kk) += -log(10)*zz/yeq(ii)*((del_ki - del_kj)*Xsec);
-                                }
+                                //Xsec += (pr.real()>0.1*k1byk2(ptlmap[Xptl[ii]]/TT)*yeq(ii).real()) ? pr : 0.;
+                                Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? pr : 0.;
                             }
                         }
-                    }
-                }
-            }
-        }
-        
-        
-        if(nn > Xptl.size()){
-            //Gam1 = Eigen::VectorXcd::Zero(nn);
-            complex<double> XsecL = 0.;
-            
-            for(const auto &prname : procL){
-                double DeltaL = 1.;
-                //====================================
-                
-                DeltaL=prname.qNumbers.begin()->second;
-                N_proc = prname.inParticles.size();
-                out_proc = prname.outParticles.size();
-                if((N_proc<2)&&(out_proc<3)){
-                    for(size_t ii = 0;ii!=Xptl.size();++ii){
-                        for(size_t jj = 0;jj!=Xptl.size();++jj){
-                            for(const auto &outptl : prname.outParticles){
-                                if((prname.inParticles[0].name.find(Xptl[ii])!=std::string::npos)&&(outptl.name.find(Xptl[jj])!=std::string::npos)){
-                                    findAmp(prname.name,id);
-                                    Xsec = 0.;
-                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                                    Xsec += (pr.real()>tolerance*yeql) ? pr : 0.;
-                                    
-                                    /**/
-                                    XsecL = 0.;
-                                    if(DeltaL>0){
-                                        pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
-                                        XsecL += (pr.real()>tolerance*yeql) ? 2.*pr : 0.;
-                                    }
-                                    if(DeltaL<0){
-                                        pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
-                                        XsecL -= (pr.real()>tolerance*yeql) ? 2.*pr : 0.;
-                                    }
-                                    
-                                    //tempf(nn-1) += log(10)*zz*((yth(ii) - yth(jj))*eps1(ii)*Xsec - DeltaL*yth(nn-1)/yeql*Xsec*(yth(jj) + 1.) );
-                                    tempf(nn-1) += log(10)*zz*((yth(ii) - yth(jj))*XsecL - DeltaL*yth(nn-1)/yeql*Xsec*(yth(jj) + 1.) );
-                                    tempfp(nn-1,nn-1) += -log(10)*zz*DeltaL/yeql*Xsec*(yth(jj) + 1.);
-                                    //tempfp(nn-1,ii) += log(10)*zz*eps1(ii)*Xsec;
-                                    tempfp(nn-1,ii) += log(10)*zz*XsecL;
-                                    //tempfp(nn-1,jj) += -log(10)*zz*(eps1(ii)*Xsec + yth(nn-1)*DeltaL/yeql*Xsec);
-                                    tempfp(nn-1,jj) += -log(10)*zz*(XsecL + yth(nn-1)*DeltaL/yeql*Xsec);
-                                }
-                            }
+                        tempf(ii) += -log(10)*zz/yeq(ii)*((yth(ii) - yth(jj))*Xsec);
+                        
+                        for(size_t kk = 0;kk!=Xptl.size();++kk){
+                            double del_ki = (kk==ii) ? 1. : 0;
+                            double del_kj = (kk==jj) ? 1. : 0;
+                            tempfp(ii,kk) += -log(10)*zz/yeq(ii)*((del_ki - del_kj)*Xsec);
                         }
                     }
-                }
-                /**/
-                if((N_proc>1)&&(out_proc<3)){
-                    bool in_lepto = false;
-                    bool out_lepto = false;
-                    for(const auto &inptl : prname.inParticles)
-                        if(inptl.name.find("lL_") != std::string::npos) in_lepto = true;
-                    for(const auto &outptl : prname.outParticles)
-                        if(outptl.name.find("lL_") != std::string::npos) out_lepto = true;
                     
-                    complex<double> ytemp = 0.,yX = 0.;
-                    double deli = 0.;
-                    double delj = 0.;
-                    for(size_t ii = 0;ii!=Xptl.size();++ii){
-                        for(size_t jj = 0;jj!=Xptl.size();++jj){
-                            for(const auto &inptl : prname.inParticles){
-                                for(const auto &outptl : prname.outParticles){
-                                    if((inptl.name.find(Xptl[ii]) != std::string::npos)&&(outptl.name.find(Xptl[jj]) != std::string::npos)){
-                                        findAmp(prname.name,id);
-                                        Xsec = 0.;
-                                        pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                                        Xsec += (pr.real()>tolerance*yeql) ? pr : 0.;
-                                        
-                                        XsecL = 0.;
-                                        /*
-                                        if(DeltaL>0){
-                                            pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
-                                            XsecL += (pr.real()>tolerance) ? 2.*pr : 0.;
-                                        }
-                                        if(DeltaL<0){
-                                            pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
-                                            XsecL -= (pr.real()>tolerance) ? 2.*pr : 0.;
-                                        }*/
-                                         
-                                        ytemp = (in_lepto) ? yth(ii) + 1. : 0.;
-                                        yX += ytemp;
-                                        ytemp = (out_lepto) ? yth(jj) + 1. : 0.;
-                                        yX += ytemp;
-                                        
-                                        deli = (in_lepto) ? 1. : 0.;
-                                        delj = (out_lepto) ? 1. : 0.;
-                                        
-                                        //std::cout << "XsecL = " << XsecL << std::endl;
-                                        
-                                        //tempf(nn-1) += log(10)*zz*( (yth(ii) - yth(jj))*eps2a(ii,jj)*Xsec - yth(nn-1)*DeltaL/yeql*Xsec*yX);
-                                        tempf(nn-1) += log(10)*zz*( (yth(ii) - yth(jj))*XsecL - yth(nn-1)*DeltaL/yeql*Xsec*yX);
-                                        tempfp(nn-1,nn-1) += -log(10)*zz*DeltaL/yeql*Xsec*yX;
-                                        
-                                        //tempfp(nn-1,ii) += log(10)*zz*(eps2a(ii,jj)*Xsec - yth(nn-1)*DeltaL/yeql*Xsec*deli);
-                                        //tempfp(nn-1,jj) += -log(10)*zz*(eps2a(ii,jj)*Xsec + yth(nn-1)*DeltaL/yeql*Xsec*delj);
-                                        tempfp(nn-1,ii) += log(10)*zz*(XsecL - yth(nn-1)*DeltaL/yeql*Xsec*deli);
-                                        tempfp(nn-1,jj) += -log(10)*zz*(XsecL + yth(nn-1)*DeltaL/yeql*Xsec*delj);
-                                        
-                                    }
+                }
+                //============= Asymmetry ===================================
+                for(const auto &prname : procL){
+                    complex<double> XsecL = 0.;
+                    
+                    //double DeltaL = 1.;
+                    //====================================
+                    double DeltaL = prname.qNumbers.begin()->second;
+                    N_proc = prname.inParticles.size();
+                    out_proc = prname.outParticles.size();
+                    
+                    if((N_proc<2)&&(out_proc<3)){
+                        for(const auto &outptl : prname.outParticles){
+                            if((prname.inParticles[0].name.find(Xptl[ii])!=std::string::npos)&&(outptl.name.find(Xptl[jj])!=std::string::npos)){
+                                Xsec = 0.;
+                                XsecL = 0.;
+                                findAmp(prname.name,id);
+                                pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                                Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? 0.5*abs(DeltaL)*pr : 0.;
+                                if(DeltaL>0){
+                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
+                                    XsecL += (!isnan(pr.real())) ? 2.*pr : 0.;
                                 }
+                                if(DeltaL<0){
+                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
+                                    XsecL -= (!isnan(pr.real())) ? 2.*pr : 0.;
+                                }
+                                temp_asym += log(10)*zz*((yth(ii) - yth(jj))*XsecL - y_temp/yeql*Xsec*(yth(jj) + 1.) );
+                                a_asym += -log(10)*zz/yeql*Xsec*(yth(jj) + 1.);
+                                
                             }
                         }
                         
                     }
                     
-                    for(size_t ii = 0;ii!=Xptl.size();++ii){
-                        for(size_t jj = 0;jj!=Xptl.size();++jj){
-                            for(const auto &inptl1 : prname.inParticles){
-                                for(const auto &inptl2 : prname.inParticles){
-                                    if((inptl1.name.find(Xptl[ii]) != std::string::npos )&&(inptl2.name.find(Xptl[jj])!= std::string::npos)){
-                                        findAmp(prname.name,id);
-                                        Xsec = 0.;
-                                        pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                                        Xsec += (pr.real()>tolerance*yeql) ? pr : 0.;
-                                        
-                                        XsecL = 0.;
-                                        /*
-                                        if(DeltaL>0){
-                                         pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
-                                         XsecL += (pr.real()>tolerance) ? 2.*pr : 0.;
-                                        }
-                                        if(DeltaL<0){
-                                         pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
-                                         XsecL -= (pr.real()>tolerance) ? 2.*pr : 0.;
-                                        }
-                                         */
-                                        //tempf(nn-1) += log(10)*zz*( (yth(ii)*yth(jj) + yth(ii) + yth(jj) )*eps2b(ii,jj)*Xsec - yth(nn-1)*DeltaL/yeql*Xsec);
-                                        //tempfp(nn-1,ii) += log(10)*zz*(yth(jj) + 1.)*eps2b(ii,jj)*Xsec;
-                                        //tempfp(nn-1,jj) += log(10)*zz*(yth(ii) + 1.)*eps2b(ii,jj)*Xsec;
-                                        tempf(nn-1) += log(10)*zz*( (yth(ii)*yth(jj) + yth(ii) + yth(jj) )*XsecL - yth(nn-1)*DeltaL/yeql*Xsec);
-                                        tempfp(nn-1,jj) += log(10)*zz*(yth(ii) + 1.)*XsecL;
-                                        tempfp(nn-1,ii) += log(10)*zz*(yth(jj) + 1.)*XsecL;
-                                        tempfp(nn-1,nn-1) += -log(10)*zz*DeltaL/yeql*Xsec;
-                                    }
+                    /**/
+                    if((N_proc>1)&&(out_proc<3)){
+                        
+                        complex<double> ytemp = 0.,yX = 0.;
+                        for(const auto &inptl : prname.inParticles){
+                            for(const auto &outptl : prname.outParticles){
+                                if((inptl.name.find(Xptl[ii]) != std::string::npos)&&(outptl.name.find(Xptl[jj]) != std::string::npos)){
+                                    Xsec = 0.;
+                                    XsecL = 0.;
+                                    
+                                    findAmp(prname.name,id);
+                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                                    Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? 0.5*abs(DeltaL)*pr : 0.;
+                                    /*
+                                     if(DeltaL>0){
+                                     pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
+                                     XsecL += (pr.real()>tolerance) ? 2.*pr : 0.;
+                                     }
+                                     if(DeltaL<0){
+                                     pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
+                                     XsecL -= (pr.real()>tolerance) ? 2.*pr : 0.;
+                                     }*/
+                                    
+                                    temp_asym += log(10)*zz*( (yth(ii) - yth(jj))*XsecL - y_temp/yeql*Xsec*(yth(ii) + yth(jj) + 2.));
+                                    a_asym += -log(10)*zz/yeql*Xsec*(yth(ii) + yth(jj) + 2.);
+                                    
+                                }
+                            }
+                        }
+                        
+                        for(const auto &inptl1 : prname.inParticles){
+                            for(const auto &inptl2 : prname.inParticles){
+                                if((inptl1.name.find(Xptl[ii]) != std::string::npos)&&(inptl2.name.find(Xptl[jj]) != std::string::npos)){
+                                    Xsec = 0.;
+                                    XsecL = 0.;
+                                    
+                                    findAmp(prname.name,id);
+                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
+                                    Xsec += (!isnan(pr.real())&&(pr.real()>0.)) ? 0.5*abs(DeltaL)*pr : 0.;
+                                    /*
+                                     if(DeltaL>0){
+                                     pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
+                                     XsecL += (pr.real()>tolerance) ? 2.*pr : 0.;
+                                     }
+                                     if(DeltaL<0){
+                                     pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
+                                     XsecL -= (pr.real()>tolerance) ? 2.*pr : 0.;
+                                     }*/
+                                    
+                                    temp_asym += log(10)*zz*( (yth(ii)*yth(jj) + yth(ii) + yth(jj) + 1.)*XsecL - y_temp/yeql*Xsec);
+                                    a_asym += -log(10)*zz/yeql*Xsec;
+                                    
                                 }
                             }
                         }
@@ -1260,21 +1214,16 @@ void BESolver(std::ofstream &ofile,param_t &pp)
                 }
                 
                 //======================================
+                
             }
         }
         
-        /*
-        std::cout << "tempfp > " << tempf.transpose() << std::endl;
-        std::cout << "tempfp > " << std::endl << tempfp << std::endl;
-        std::cout << std::endl;
-        std::cout << "tempfp^(-1) > " << std::endl << tempfp.inverse() << std::endl;
-        std::cout << std::endl;
-        std::cout << "ath^(-1)" << std::endl << ath.determinant() << std::endl;
-         */
         ath = tempfp.real();
         bth = tempf - tempfp*yth;
-        int dim = Xptl.size() + 1;
-        //std::cout << "Exp Matrix >> " << std::endl << expM(ath*hh, dim) << std::endl << std::endl;
+        
+        b_asym = temp_asym - a_asym*y_temp;
+        
+        int dim = Xptl.size();
         
         if((ath.determinant()!=0)&&(!isnan(ath.determinant()))&&(!isinf(ath.determinant())))
         {
@@ -1282,57 +1231,30 @@ void BESolver(std::ofstream &ofile,param_t &pp)
         }
         else
         {
-            ypth = yth;
-        }
-          
-        
-        /*
-        std::cout << "===============================================" << std::endl;
-        std::cout << "ΔL = " << DeltaL1 <<std::endl;
-        std::cout << "===============================================" << std::endl;
-        */
-        gammaL1 = 0.;
-        gammaL2 = 0.;
-        for(const auto &prname : procL)
-        {
-            
-            if(DeltaL1==prname.qNumbers.begin()->second){
-                findAmp(prname.name,id);
-                if(!(prname.name.find("OneLoop")!=std::string::npos)){
-                    double gamma_temp = gamma(id,TT,pp,prname,0);
-                    gammaL1 += gamma_temp;
-                }
-                //gammaL1 += gamma(id,TT,pp,prname);
-                //std::cout << "fG = " << id;
-                //std::cout << "name = " << prname.name << " γ("<< TT << ") = " << gamma_temp << std::endl;
-            }
-            if(DeltaL2==prname.qNumbers.begin()->second){
-                findAmp(prname.name,id);
-                if(!(prname.name.find("OneLoop")!=std::string::npos)){
-                    double gamma_temp = gamma(id,TT,pp,prname,0);
-                    gammaL2 += gamma_temp;
-                    //std::cout << "fG = " << id;
-                    //std::cout << " name = " << prname.name << std::endl;
-                    
-                    
-                }
-            }
+            ypth = yth + MatrixXd::Identity(dim, dim)*bth*hh;
         }
         
-        
-        ofile << TT << "\t"<< zz << "\t" << DeltaL1*gammaL1/(s*Hb*zz*yeql) << "\t" << DeltaL2*gammaL2/(s*Hb*zz*yeql)
-        << "\t" << yn(nn-1).real() << std::endl;
-        std::cout << TT << "\t"<< zz << "\t" << DeltaL1*gammaL1/(s*Hb*zz*yeql) << "\t" << DeltaL2*gammaL2/(s*Hb*zz*yeql) << "\t" << sph*yn(nn-1).real()/(8.6E-11) << std::endl;
-        
-        
+        if(a_asym!=0.){
+            yp_asym = exp(a_asym*hh)*y_temp + 1./a_asym*(exp(a_asym*hh) - 1.)*b_asym;
+        }
+        if(a_asym==0.){
+            yp_asym = y_temp + b_asym*hh;
+        }
         
         yn = ypth;
+        y_asym = yp_asym;
+        
+        double washout_L = washout(zz,pp,"L");
+        
+        ofile << TT << "\t"<< zz << "\t" << washout_L << "\t" << y_asym.real() << std::endl;
+        std::cout << TT << "\t"<< zz << "\t" << washout_L << "\t" << sph*y_asym.real()/(8.6E-11) << std::endl;
         
         std::cout << yn.transpose() << std::endl;
       
-        
         ++zi;
     }while((zi<=steps));
     
 }
 
+
+}

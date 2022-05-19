@@ -62,6 +62,7 @@ namespace mty::lib {
 
     void ParticleData::clear()
     {
+        particleNames.clear();
         qNumbers.clear();
         processes.clear();
     }

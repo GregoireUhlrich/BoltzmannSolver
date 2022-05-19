@@ -6,412 +6,19 @@ using namespace std;
 using namespace csl;
 using namespace mty;
 
-using namespace leptoproto;
 
 using namespace mty::lib;
 
 
-double washout(double zz,double &Mscale,std::vector<Process> &procL,param_t &pp)
-{
-    double TT = Mscale/zz;
-    //std::cout << "TT = " << TT << std::endl;
-    double Hb = sqrt(4.*pow(M_PI,3.)*geffT(TT)/45.)*pow(TT,2.)/mpl;
-    double sT = geffT(TT)*2*pow(M_PI,2.)/45.;
-    double yeql = 4./pow(M_PI,2.)*pow(sT,-1.);
-    double s = geffT(TT)*2*pow(M_PI,2.)/45.*pow(TT,3.);
-    double gammaL1 = 0.;
-    double gammaL2 = 0.;
-    int DeltaL1 = 1,DeltaL2 = 2;
-    int id = 0;
-    for(const auto &prname : procL)
-    {
-        
-        if(DeltaL1==prname.qNumbers.begin()->second){
-            findAmp(prname.name,id);
-            if((prname.name.find("Tree")!=std::string::npos)){
-                double gamma_temp = gamma(id,TT,pp,prname,0);
-                gammaL1 += gamma_temp;
-            }
-        }
-        if(DeltaL2==prname.qNumbers.begin()->second){
-            findAmp(prname.name,id);
-            if((prname.name.find("Tree")!=std::string::npos)){
-                double gamma_temp = gamma(id,TT,pp,prname,0);
-                gammaL2 += gamma_temp;
-            }
-        }
-    }
-    return DeltaL1*gammaL1/(s*Hb*zz*yeql) + DeltaL2*gammaL2/(s*Hb*zz*yeql);
-    
-}
-
-double bisection(double a, double b,double z_cut,param_t &pp,double &Mscale,asym_param ap)
-{
-    double fa,fb,fc;
-    
-    std::vector<Process> procL,procQ;
-    
-    //ParticleData pdata;
-    
-    //pdata.loadFile("script/test.json");
-    
-    procL = ap.procL;//pdata.getProcessesFromQNumberViolation("L");
-    
-    
-    fa = washout(pow(10.,a),Mscale,procL,pp) - z_cut;
-    
-    fb = washout(pow(10.,b),Mscale,procL,pp) - z_cut;
-    
-    if (fa * fb >= 0) {
-        //cout << "You have not assumed right a and b\n";
-        return 0;
-    }
-    double cc = a;
-    while ((b-a) >= EP) {
-        // Find middle point
-        cc = (a+b)/2;
-        // Check if middle point is root
-        fc = washout(pow(10.,cc),Mscale,procL,pp) - z_cut;
-        if (fc == 0.0)
-            break;
-        // Decide the side to repeat the steps
-        else if (fc*fa < 0)
-            b = cc;
-        else
-            a = cc;
-    }
-    //cout << "The value of root is : " << cc << endl;
-    
-    return cc;
-}
-
-
-double freezeout(param_t &pp,asym_param ap)
-{
-    std::vector<Process> procL,procQ;
-    
-    //ParticleData pdata;
-    
-    //pdata.loadFile("script/test.json");
-    
-    procL = ap.procL;//pdata.getProcessesFromQNumberViolation("L");
-    procQ = ap.procQ;//pdata.getProcessesFromQNumberConservation("Q");
-    
-    //double yB_ratio = 0.;
-    
-    vector<double> mass_scale;
-    
-    for(auto &name : Xptl){
-        mass_scale.push_back(Massp(name,pp));
-    }
-    
-    double Mscale = *max_element(mass_scale.begin(), mass_scale.end());;
-    
-    //double z_result = bisection(-1., 2.,pp,Mscale);
-    
-    //std::cout << "====== \t z_reasult =  " << z_result << std::endl;
-    double steps = 10.;
-    double sph = 28./79.;
-    double hh = 3./steps;
-    
-    double TT;
-    int id = 0;
-    double zi = 0.;
-    double zz_in = pow(10.,bisection(-1., 2.,10.,pp,Mscale,ap));//zi;
-    double zz_out = pow(10.,bisection(-1., 2.,0.1,pp,Mscale,ap));//zi;
-     
-    double tolerance = 1.E-05;
-    
-    int N_proc;
-    int out_proc;
-    size_t nn = Xptl.size() + 1;
-    
-    Eigen::VectorXcd yn(nn),eps1(Xptl.size());
-    
-    Eigen::MatrixXcd eps2a(Xptl.size(),Xptl.size()),eps2b(Xptl.size(),Xptl.size());
-    
-    Eigen::VectorXcd tempf(nn),bth(nn),yth(nn),ypth(nn),yeq(nn);
-    
-    Eigen::MatrixXcd tempfp(nn,nn),athinv(nn,nn),exath(nn,nn);
-    Eigen::MatrixXd ath(nn,nn);
-    
-    Eigen::MatrixXcd Gam2(nn,nn);
-    Eigen::VectorXcd Gam1(nn);
-    
-    
-    yn = Eigen::VectorXcd::Zero(nn);
-    yn << 0.,0.,0.,0.,0.;
-    
-    hh = (log10(zz_out) - log10(zz_in))/steps;
-    
-    zi = 0.;
-    do{
-        double zz = pow(10., log10(zz_in) + hh*zi);
-        TT = Mscale/zz;
-        
-        complex<double> Xsec = 0., pr = 0.;
-        
-        double Hb = sqrt(4.*pow(M_PI,3.)*geffT(TT)/45.)*pow(TT,2.)/mpl;
-        double sT = geffT(TT)*2*pow(M_PI,2.)/45.;
-        double yeql = 4./pow(M_PI,2.)*pow(sT,-1.);
-        double s = geffT(TT)*2*pow(M_PI,2.)/45.*pow(TT,3.);
-        
-        tempf = Eigen::VectorXcd::Zero(nn);
-        tempfp = Eigen::MatrixXcd::Zero(nn,nn);
-        
-        Gam1 = Eigen::VectorXcd::Zero(nn);
-        Gam2 = Eigen::MatrixXcd::Zero(nn,nn);
-        
-        yth = yn;
-        
-        size_t si = 0;
-        
-        auto k1byk2 = [&](const double& zx) { return zx/(1.5 + zx); };
-        
-        for(const auto &mname : Xptl){
-            yeq(si) = Yeq(mname,pp,TT);
-            tempf(si) += (yth(si)+1.)*k1byk2(Massp(mname,pp)/TT);
-            tempfp(si,si) += k1byk2(Massp(mname,pp)/TT);
-            ++si;
-        }
-        
-        
-        yeq(nn-1) = yeql;
-        
-        for(size_t ii = 0;ii!=Xptl.size();++ii){
-            for(size_t jj = 0;jj!=Xptl.size();++jj){
-                for(const auto &prname : procQ){
-                    N_proc = prname.inParticles.size();
-                    if(N_proc>1){
-                        Xsec = 0.;
-                        if((prname.inParticles[0].name.find(Xptl[ii]) != std::string::npos)&&(prname.inParticles[1].name.find(Xptl[jj] ) != std::string::npos))
-                        {
-                            findAmp(prname.name,id);
-                            pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                            Xsec += (pr.real()>tolerance*yeq(ii).real()) ? pr : 0.;
-                        }
-                        
-                        tempf(ii) += -log(10)*zz/yeq(ii)*((yth(ii)*yth(jj) + yth(ii) + yth(jj))*Xsec);
-                        
-                        for(size_t kk = 0;kk!=Xptl.size();++kk){
-                            
-                            double del_ki = (kk==ii) ? 1. : 0;
-                            double del_kj = (kk==jj) ? 1. : 0;
-                            tempfp(ii,kk) += -log(10)*zz/yeq(ii)*(del_ki*yth(jj) + del_ki + del_kj + del_kj*yth(ii))*Xsec;
-                        }
-                        
-                    }
-                //}
-                //for(const auto &prname : procL){
-                    for(const auto &pin : prname.inParticles){
-                        for(const auto &pout : prname.outParticles){
-                            if((pin.name.find(Xptl[ii]) != std::string::npos)&&(pout.name.find(Xptl[jj] ) != std::string::npos)){
-                                Xsec = 0.;
-                                findAmp(prname.name,id);
-                                pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                                Xsec += (pr.real()>tolerance*yeq(ii).real()) ? pr : 0.;
-                                
-                                tempf(ii) += -log(10)*zz/yeq(ii)*((yth(ii) - yth(jj))*Xsec);
-                                
-                                for(size_t kk = 0;kk!=Xptl.size();++kk){
-                                    double del_ki = (kk==ii) ? 1. : 0;
-                                    double del_kj = (kk==jj) ? 1. : 0;
-                                    tempfp(ii,kk) += -log(10)*zz/yeq(ii)*((del_ki - del_kj)*Xsec);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-         
-        
-        
-        if(nn > Xptl.size()){
-            //Gam1 = Eigen::VectorXcd::Zero(nn);
-            complex<double> XsecL = 0.;
-            
-            for(const auto &prname : procL){
-                double DeltaL = 1.;
-                //====================================
-                
-                DeltaL=prname.qNumbers.begin()->second;
-                N_proc = prname.inParticles.size();
-                out_proc = prname.outParticles.size();
-                if((N_proc<2)&&(out_proc<3)){
-                    for(size_t ii = 0;ii!=Xptl.size();++ii){
-                        for(size_t jj = 0;jj!=Xptl.size();++jj){
-                            for(const auto &outptl : prname.outParticles){
-                                if((prname.inParticles[0].name.find(Xptl[ii])!=std::string::npos)&&(outptl.name.find(Xptl[jj])!=std::string::npos)){
-                                    findAmp(prname.name,id);
-                                    Xsec = 0.;
-                                    pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                                    Xsec += (pr.real()>tolerance*yeql) ? pr : 0.;
-                                    
-                                    /**/
-                                    XsecL = 0.;
-                                    if(DeltaL>0){
-                                        pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
-                                        XsecL += (pr.real()>tolerance*yeql) ? 2.*pr : 0.;
-                                    }
-                                    if(DeltaL<0){
-                                        pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
-                                        XsecL -= (pr.real()>tolerance*yeql) ? 2.*pr : 0.;
-                                    }
-                                    
-                                    //tempf(nn-1) += log(10)*zz*((yth(ii) - yth(jj))*eps1(ii)*Xsec - DeltaL*yth(nn-1)/yeql*Xsec*(yth(jj) + 1.) );
-                                    tempf(nn-1) += log(10)*zz*((yth(ii) - yth(jj))*XsecL - DeltaL*yth(nn-1)/yeql*Xsec*(yth(jj) + 1.) );
-                                    tempfp(nn-1,nn-1) += -log(10)*zz*DeltaL/yeql*Xsec*(yth(jj) + 1.);
-                                    //tempfp(nn-1,ii) += log(10)*zz*eps1(ii)*Xsec;
-                                    tempfp(nn-1,ii) += log(10)*zz*XsecL;
-                                    //tempfp(nn-1,jj) += -log(10)*zz*(eps1(ii)*Xsec + yth(nn-1)*DeltaL/yeql*Xsec);
-                                    tempfp(nn-1,jj) += -log(10)*zz*(XsecL + yth(nn-1)*DeltaL/yeql*Xsec);
-                                }
-                            }
-                        }
-                    }
-                }
-                /**/
-                if((N_proc>1)&&(out_proc<3)){
-                    bool in_lepto = false;
-                    bool out_lepto = false;
-                    for(const auto &inptl : prname.inParticles)
-                        if(inptl.name.find("lL_") != std::string::npos) in_lepto = true;
-                    for(const auto &outptl : prname.outParticles)
-                        if(outptl.name.find("lL_") != std::string::npos) out_lepto = true;
-                    
-                    complex<double> ytemp = 0.,yX = 0.;
-                    double deli = 0.;
-                    double delj = 0.;
-                    for(size_t ii = 0;ii!=Xptl.size();++ii){
-                        for(size_t jj = 0;jj!=Xptl.size();++jj){
-                            for(const auto &inptl : prname.inParticles){
-                                for(const auto &outptl : prname.outParticles){
-                                    if((inptl.name.find(Xptl[ii]) != std::string::npos)&&(outptl.name.find(Xptl[jj]) != std::string::npos)){
-                                        findAmp(prname.name,id);
-                                        Xsec = 0.;
-                                        pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                                        Xsec += (pr.real()>tolerance*yeql) ? pr : 0.;
-                                        
-                                        XsecL = 0.;
-                                         
-                                        /*
-                                        if(DeltaL>0){
-                                            pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
-                                            XsecL += (pr.real()>tolerance) ? 2.*pr : 0.;
-                                        }
-                                        if(DeltaL<0){
-                                            pr = (id < ((int) f_G.size())) ? abs(gamma(id,TT,pp,prname,1)/(s*Hb*zz)) : 0.;
-                                            XsecL -= (pr.real()>tolerance) ? 2.*pr : 0.;
-                                        }*/
-                                        ytemp = (in_lepto) ? yth(ii) + 1. : 0.;
-                                        yX += ytemp;
-                                        ytemp = (out_lepto) ? yth(jj) + 1. : 0.;
-                                        yX += ytemp;
-                                        
-                                        deli = (in_lepto) ? 1. : 0.;
-                                        delj = (out_lepto) ? 1. : 0.;
-                                        
-                                        tempf(nn-1) += log(10)*zz*( (yth(ii) - yth(jj))*XsecL - yth(nn-1)*DeltaL/yeql*Xsec*yX);
-                                        tempfp(nn-1,nn-1) += -log(10)*zz*DeltaL/yeql*Xsec*yX;
-                                        
-                                        tempfp(nn-1,ii) += log(10)*zz*(XsecL - yth(nn-1)*DeltaL/yeql*Xsec*deli);
-                                        tempfp(nn-1,jj) += -log(10)*zz*(XsecL + yth(nn-1)*DeltaL/yeql*Xsec*delj);
-                                        
-                                    }
-                                }
-                            }
-                        }
-                        
-                    }
-                    
-                    for(size_t ii = 0;ii!=Xptl.size();++ii){
-                        for(size_t jj = 0;jj!=Xptl.size();++jj){
-                            for(const auto &inptl1 : prname.inParticles){
-                                for(const auto &inptl2 : prname.inParticles){
-                                    if((inptl1.name.find(Xptl[ii]) != std::string::npos )&&(inptl2.name.find(Xptl[jj])!= std::string::npos)){
-                                        findAmp(prname.name,id);
-                                        Xsec = 0.;
-                                        pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,0)/(s*Hb*zz) : 0.;
-                                        Xsec += (pr.real()>tolerance*yeql) ? pr : 0.;
-                                        
-                                        XsecL = 0.;
-                                        /*
-                                        if(DeltaL>0){
-                                         pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
-                                         XsecL += (pr.real()>tolerance) ? 2.*pr : 0.;
-                                        }
-                                        if(DeltaL<0){
-                                         pr = (id < ((int) f_G.size())) ? gamma(id,TT,pp,prname,1)/(s*Hb*zz) : 0.;
-                                         XsecL -= (pr.real()>tolerance) ? 2.*pr : 0.;
-                                        }
-                                         */
-                                        tempf(nn-1) += log(10)*zz*( (yth(ii)*yth(jj) + yth(ii) + yth(jj) )*XsecL - yth(nn-1)*DeltaL/yeql*Xsec);
-                                        tempfp(nn-1,jj) += log(10)*zz*(yth(ii) + 1.)*XsecL;
-                                        tempfp(nn-1,ii) += log(10)*zz*(yth(jj) + 1.)*XsecL;
-                                        tempfp(nn-1,nn-1) += -log(10)*zz*DeltaL/yeql*Xsec;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                //======================================
-            }
-        }
-        
-        ath = tempfp.real();
-        bth = tempf - tempfp*yth;
-        int dim = Xptl.size() + 1;
-        
-        if((ath.determinant()!=0)&&(!isnan(ath.determinant()))&&(!isinf(ath.determinant())))
-        {
-            ypth = expM(ath*hh, dim)*yth + tempfp.inverse()*(expM(ath*hh, dim) -  MatrixXd::Identity(dim, dim))*bth;
-        }
-        else
-        {
-            ypth = yth;
-        }
-        //ofile << TT << "\t"<< zz << "\t" << DeltaL1*gammaL1/(s*Hb*zz*yeql) << "\t" << DeltaL2*gammaL2/(s*Hb*zz*yeql) << "\t" << yn(nn-1).real() << std::endl;
-        std::cout << TT << "\t"<< zz << "\t" << washout(zz,Mscale,procL,pp) << "\t" << sph*yn(nn-1).real()/(8.6E-11) << std::endl;
-        
-        yn = ypth;
-        //std::cout << yn.transpose() << std::endl;
-      
-        ++zi;
-    }while(zi<=steps);//while((TT>=100.));//
-    
-    return sph*yn(nn-1).real()/(8.6E-11);
-    
-}
+using namespace leptoproto;
 
 /**/
-void analysis(int i_start,int i_end,asym_param ap)
+void analysis(int i_start,int i_end)
 {
     double ii = ((double) i_start);
     
     std::string filename = "output-" + std::to_string(i_start) + std::to_string(i_end) + ".txt";
     std::ofstream output_file(filename);
-    
-    std::vector<Process> procL,procQ;
-    
-    //ParticleData pdata;
-    
-    //pdata.loadFile("script/test.json");
-    
-    procL = ap.procL;//pdata.getProcessesFromQNumberViolation("L");
-    procQ = ap.procQ;//pdata.getProcessesFromQNumberConservation("Q");
-    
-    /*
-    asym_param ap;
-    
-    ap.procL = procL;
-    ap.procQ = procQ;
-    */
-    
-    //srand(time(NULL));
-    
     
     do
     {
@@ -557,7 +164,7 @@ void analysis(int i_start,int i_end,asym_param ap)
                 //pp.print();
                 
                 //double yB_ratio = freezeout(pp);
-                double yB_ratio = freezeout(pp,ap);
+                double yB_ratio = freezeout(pp);
                 
                 output_file << MN3 << "\t" << muSet/MN3 << "\t" << diff << "\t" << yB_ratio << std::endl;
                 
@@ -704,26 +311,43 @@ int main(int argc, char* argv[]) {
     
     pp.print();
     
-    std::cout << "eps = " << epsilon1("L","N_3",pp) << std::endl;
+    initialize(pp);
     
+    std::cout << "eps = " << epsilon1("L","N_3",pp) << std::endl;
+    //std::cout << "eps = " << epsilon1("L","N_3c",pp) << std::endl;
     std::vector<Process> procL,procQ;
     
     ParticleData pdata;
     
     pdata.loadFile("script/test.json");
     
+    //data.load("test.json");
+    std::cout << std::endl << " ======= L =========" << std::endl;
+    std::vector<std::string> particleNames = pdata.getParticleNames();
+    for (const auto &name : particleNames) {
+        std::cout << name << " : " << pdata.getQuantumNumberValue("L", name).getValue() << std::endl;
+    }
+    std::cout << std::endl << " ======= Q =========" << std::endl;
+    std::vector<std::string> particleName = pdata.getParticleNames();
+    for (const auto &name : particleName) {
+        std::cout << name << " : " << pdata.getQuantumNumberValue("Q", name).getValue() << std::endl;
+    }
+    /*
+    std::cout << std::endl << " ======= Th =========" << std::endl;
+    std::vector<std::string> ptlth = pdata.getParticleNames();
+    for (const auto &name : ptlth) {
+        std::cout << name << " : " << pdata.getQuantumNumberValue("Th", name).getValue() << std::endl;
+        std::cout << "Mass  >> " << Massp(name,pp) << std::endl;
+    }
+     */
+    
     procL = pdata.getProcessesFromQNumberViolation("L");
     procQ = pdata.getProcessesFromQNumberConservation("Q");
     
-    /**/
-    asym_param ap;
-    
-    ap.procL = procL;
-    ap.procQ = procQ;
     
     
     auto startTime = std::chrono::high_resolution_clock::now();
-    double yB_ratio = freezeout(pp,ap);
+    double yB_ratio = freezeout(pp);
     //double yB_ratio = freezeout(pp);
     auto stopTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stopTime - startTime);
@@ -731,16 +355,15 @@ int main(int argc, char* argv[]) {
     std::cout << "yB =  " << yB_ratio << std::endl;
     
     
-    
     /**/
+    std::string pname = argv[5];
+    std::ofstream ofile(pname);
     
-    //std::string pname = argv[5];
-    //std::ofstream ofile(pname);
-    
-    //BESolver(ofile,pp);
-    //ofile.close();
+    BESolver(ofile,pp);
+    ofile.close();
      
-    
+     
+     
     //analysis(0,10);
     /*
     thread t1(analysis,1,50,ap);

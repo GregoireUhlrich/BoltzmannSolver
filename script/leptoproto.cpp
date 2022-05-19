@@ -94,10 +94,208 @@ void calculateAndGenerateLib(
             lib.addFunction(finalProcessName, sampl);
             //file << finalProcessName << std::endl;
         }
-        
     }
-    
-    
+}
+
+std::vector<mty::Insertion> conjugateParticles(
+        std::vector<mty::Insertion> const &insertions,
+        std::vector<size_t>         const &positions
+        )
+{
+    auto res = insertions;
+    for (size_t i : positions) {
+        res[i] = AntiPart(res[i]);
+    }
+    return res;
+}
+
+std::vector<mty::Insertion> conjugateParticle(
+        std::vector<mty::Insertion> const &insertions,
+        size_t position
+        )
+{
+    return conjugateParticles(insertions, std::vector<size_t>{position});
+}
+
+std::vector<std::vector<mty::Insertion>> getIndependentInsertions_1to2(
+        std::vector<mty::Insertion> const &insertions
+        )
+{
+    if (insertions.size() != 3) {
+        std::cerr << "Needed three insertions in "
+            << "independent insertions for 1 to 2 processes."
+            << std::endl;
+        exit(1);
+    }
+    for (size_t i = 0; i != 3; ++i) {
+        if (insertions[i].isIncoming() != (i < 1)) {
+            std::cerr << "Insertion " << i << " (" 
+                << insertions[i].getField()->getName() << ") should be "
+                << ((i < 1) ? "incoming" : "outgoing") 
+                << " in a 1 to 2 process." << std::endl;
+            exit(1);
+        }
+        if (!insertions[i].isParticle()) {
+            std::cerr << "Insertion " << i << " ("
+                << insertions[i].getField()->getName() << ") should not be "
+                << "conjugated for the 1 to 2 process." << std::endl;
+            exit(1);
+        }
+    }
+    std::vector<std::vector<mty::Insertion>> res;
+    res.reserve(8);
+    res.push_back(insertions);
+    std::array<bool, 3> selfConjugates;
+    for (size_t i = 0; i != 3; ++i) {
+        selfConjugates[i] = insertions[i].getField()->isSelfConjugate();
+    }
+    bool sameOutgoing = insertions[2].getField() == insertions[3].getField();
+    if (!selfConjugates[0]) {
+        res.push_back(conjugateParticle(insertions, 0));
+    }
+    size_t last = res.size();
+    for (size_t i = 0; i != last; ++i) {
+        if (!selfConjugates[1]) {
+            res.push_back(conjugateParticle(res[i], 1));
+            if (!selfConjugates[2]) {
+                res.push_back(conjugateParticles(res[i], {1, 2}));
+                if (!sameOutgoing) {
+                    res.push_back(conjugateParticle(res[i], 2));
+                }
+            }
+        }
+        else if (!selfConjugates[2]) {
+            res.push_back(conjugateParticle(res[i], 2));
+        }
+    }
+    return res;
+}
+
+std::vector<std::vector<mty::Insertion>> getIndependentInsertions_2to2(
+        std::vector<mty::Insertion> const &insertions
+        )
+{
+    if (insertions.size() != 4) {
+        std::cerr << "Needed four insertions in "
+            << "independent insertions for 2 to 2 processes."
+            << std::endl;
+        exit(1);
+    }
+    for (size_t i = 0; i != 4; ++i) {
+        if (insertions[i].isIncoming() != (i < 2)) {
+            std::cerr << "Insertion " << i << " (" 
+                << insertions[i].getField()->getName() << ") should be "
+                << ((i < 2) ? "incoming" : "outgoing") 
+                << " in a 2 to 2 process." << std::endl;
+            exit(1);
+        }
+        if (!insertions[i].isParticle()) {
+            std::cerr << "Insertion " << i << " ("
+                << insertions[i].getField()->getName() << ") should not be "
+                << "conjugated for the 2 to 2 process." << std::endl;
+            exit(1);
+        }
+    }
+    std::vector<std::vector<mty::Insertion>> res;
+    res.reserve(16);
+    res.push_back(insertions);
+    std::array<bool, 4> selfConjugates;
+    for (size_t i = 0; i != 4; ++i) {
+        selfConjugates[i] = insertions[i].getField()->isSelfConjugate();
+    }
+    bool sameIncoming = insertions[0].getField() == insertions[1].getField();
+    bool sameOutgoing = insertions[2].getField() == insertions[3].getField();
+    if (!selfConjugates[0]) {
+        res.push_back(conjugateParticle(insertions, 0));
+        if (!selfConjugates[1]) {
+            res.push_back(conjugateParticles(insertions, {0, 1}));
+            if (!sameIncoming) {
+                res.push_back(conjugateParticle(insertions, 1));
+            }
+        }
+    }
+    else if (!selfConjugates[1]) {
+        res.push_back(conjugateParticle(insertions, 1));
+    }
+    size_t last = res.size();
+    for (size_t i = 0; i != last; ++i) {
+        if (!selfConjugates[2]) {
+            res.push_back(conjugateParticle(res[i], 2));
+            if (!selfConjugates[3]) {
+                res.push_back(conjugateParticles(res[i], {2, 3}));
+                if (!sameOutgoing) {
+                    res.push_back(conjugateParticle(res[i], 3));
+                }
+            }
+        }
+        else if (!selfConjugates[3]) {
+            res.push_back(conjugateParticle(res[i], 3));
+        }
+    }
+    return res;
+}
+
+void calculateOneAsymmetry(
+         mty::Model                        &model,
+         mty::Library                      &lib,
+         std::vector<mty::Insertion> const &insertions,
+         QuantumNumberData const           &qData,
+         ProcessData                       &pData
+        )
+{
+    std::vector<std::vector<mty::Insertion>> allInsertions;
+    if (insertions.size() == 4) {
+        // 2 to 2 process
+        allInsertions = getIndependentInsertions_2to2(insertions);
+    }
+    else if (insertions.size() == 3) {
+        // 1 to 2 process
+        allInsertions = getIndependentInsertions_1to2(insertions);
+    }
+    for (const auto &ins : allInsertions) {
+        calculateAndGenerateLib("Tree", model, ins, lib, qData, pData);
+        calculateAndGenerateLib("Asym", model, ins, lib, qData, pData, false, true);
+    }
+}
+
+void calculateAllAsymmetries(
+         mty::Model              &model,
+         mty::Library            &lib,
+         QuantumNumberData const &qData,
+         ProcessData             &pData,
+         std::string       const &thermalNumber = "Th"
+         )
+{
+    auto XX = model.getPhysicalParticles([&](Particle const &p) {
+        return qData.value(thermalNumber, p) != 0
+            && !IsOfType<GhostBoson>(p)
+            && !IsOfType<GoldstoneBoson>(p);
+    });
+    auto smBath = model.getPhysicalParticles([&](Particle const &p) {
+        return qData.value(thermalNumber, p) == 0
+            && !IsOfType<GhostBoson>(p)
+            && !IsOfType<GoldstoneBoson>(p);
+    });
+    std::vector<mty::Insertion> insertions;
+    for (size_t i = 0; i != XX.size(); ++i) {
+        for (size_t j = 0; j != XX.size(); ++j) {
+            for (size_t k = 0; k != smBath.size(); ++k) {
+                calculateOneAsymmetry(model, lib,
+                        {Incoming(XX[i]), Outgoing(smBath[k]), Outgoing(XX[j])}, 
+                        qData, pData);
+                for (size_t l = 0; l != smBath.size(); ++l) {
+                    if (j >= i && l >= k) {
+                        calculateOneAsymmetry(model, lib ,
+                                {Incoming(XX[i]), Incoming(XX[j]), Outgoing(smBath[k]), Outgoing(smBath[l])}, 
+                                qData, pData);
+                    }
+                    calculateOneAsymmetry(model, lib,
+                            {Incoming(XX[i]), Incoming(smBath[k]), Outgoing(XX[j]), Outgoing(smBath[l])}, 
+                            qData, pData);
+                }
+            }
+        }
+    }
 }
 
 int main() {
@@ -412,6 +610,17 @@ int main() {
                            { 0   ,  0    , 0    , -1  , 0  , -1    , -1    , -1 , 0 ,0  }
                            );
     
+    qData.addQuantumNumber(
+                           "Th",
+                           {"N_1", "N_2", "N_3", "et","SS","lL_1","lL_2","lL_3","W","B"},
+                           { 1   ,  1    , 1    , 1  , 0  , 0    , 0    , 0    , 0 ,0  }
+                           );
+    qData.addQuantumNumber(
+                           "gg",
+                           {"N_1", "N_2", "N_3", "et","SS","lL_1","lL_2","lL_3","W","B"},
+                           { 2   ,  2    , 2    , 2  , 1  , 2    , 2    , 2    , 2 ,2  }
+                           );
+    
     ///////////////////////////////////////////////////
     //
     ///////////////////////////////////////////////////
@@ -426,235 +635,7 @@ int main() {
     mty::option::decomposeInOperators = true;
     mty::option::decomposeInLocalOperator = false;
     
-    //calculateAndGenerateLib("CP", toyModel, {Incoming("etm"),Incoming("etm"), Outgoing("e"), Outgoing("e")}, myLib,false,false);
-    //calculateAndGenerateLib("CP", toyModel, {Incoming("etm"),AntiPart(Incoming("etm")), AntiPart(Outgoing("W")), Outgoing("W")}, myLib,true,false);
-    
-    
-    auto XX = toyModel.getPhysicalParticles([&](Particle p) {
-        const auto name = p->getName();
-        return (name.find("N_") != std::string::npos || name == "et");
-    });
-    
-    auto leptons = toyModel.getPhysicalParticles([&](Particle p) {
-        const auto name = p->getName();
-        return (name.find("lL_") != std::string::npos);
-    });
-    /*
-     auto leptons = toyModel.getPhysicalParticles([&](Particle p) {
-     const auto name = p->getName();
-     return (name == "le" || name == "lmu" || name == "ltau");
-     });
-     
-     auto neutrinos = toyModel.getPhysicalParticles([&](Particle p) {
-     const auto name = p->getName();
-     return (name.find("nu_") != std::string::npos);
-     });
-     */
-    auto vectors = toyModel.getPhysicalParticles([&](Particle p) {
-        return p->getSpinDimension() == 3
-        && (p->getGaugedGroup() == toyModel.getGaugedGroup("L") || p->getGaugedGroup() == toyModel.getGaugedGroup("Y"));
-    });
-    
-    auto smbath = toyModel.getPhysicalParticles([&](Particle p) {
-        const auto name = p->getName();
-        return ((name.find("lL_") != std::string::npos || name == "SS")||(p->getSpinDimension() == 3
-        && (p->getGaugedGroup() == toyModel.getGaugedGroup("L") || p->getGaugedGroup() == toyModel.getGaugedGroup("Y"))));
-    });
-    /*
-     for( const auto &dd : XX) {
-     for( const auto &vv : vectors) {
-     auto insertions = {
-     Incoming(dd),
-     AntiPart(Incoming(dd)),
-     Outgoing(vv),
-     Outgoing(AntiPart(vv))
-     };
-     calculateAndGenerateLib("Lepto", toyModel, insertions, myLib,qData,pData);
-     }
-     }
-     */
-    
-    mty::option::excludeTadpoles = true;
-    mty::option::excludeMassCorrections = true;
-    mty::option::excludeTriangles = false;
-    mty::option::excludeBoxes = true;
-    
-    for( const auto &dd : XX) {
-        for( const auto &dd1 : XX) {
-            for( const auto &sb : smbath) {
-                for( const auto &sb1 : smbath) {
-                    auto ins0 = {
-                        Incoming(dd),
-                        Incoming(dd1),
-                        Outgoing(sb),
-                        Outgoing(sb1)
-                    };
-                    calculateAndGenerateLib("Tree", toyModel, ins0, myLib,qData,pData);
-                    
-                    //calculateAndGenerateLib("Asym", toyModel,ins0, myLib,qData,pData,false,true);
-                    //calculateAndGenerateLib("Asym", toyModel,AntiPart(ins0), myLib,qData,pData,false,true);
-                    /**/
-                    auto ins1 = {
-                        Incoming(dd),
-                        AntiPart(Incoming(sb)),
-                        AntiPart(Outgoing(dd1)),
-                        Outgoing(sb1)
-                    };
-                    calculateAndGenerateLib("Tree", toyModel, ins1, myLib,qData,pData);
-                    
-                    //calculateAndGenerateLib("Asym", toyModel,ins1, myLib,qData,pData,false,true);
-                    //calculateAndGenerateLib("Asym", toyModel,AntiPart(ins1), myLib,qData,pData,false,true);
-                    
-                    auto ins2 = {
-                        Incoming(dd),
-                        AntiPart(Incoming(dd1)),
-                        Outgoing(sb),
-                        AntiPart(Outgoing(sb1))
-                    };
-                    
-                    calculateAndGenerateLib("Tree", toyModel, ins2, myLib,qData,pData);
-                    
-                    calculateAndGenerateLib("Asym", toyModel,ins2, myLib,qData,pData,false,true);
-                    calculateAndGenerateLib("Asym", toyModel,AntiPart(ins2), myLib,qData,pData,false,true);
-                    
-                }
-                auto ins3 = {
-                    Incoming(dd),
-                    Outgoing(sb),
-                    AntiPart(Outgoing(dd1))
-                };
-                calculateAndGenerateLib("Tree", toyModel, ins3, myLib,qData,pData);
-                
-                calculateAndGenerateLib("Asym", toyModel,ins3, myLib,qData,pData,false,true);
-                calculateAndGenerateLib("Asym", toyModel,AntiPart(ins3), myLib,qData,pData,false,true);
-                
-            }
-            /*
-            for( const auto &vv : vectors) {
-                auto ins4 = {
-                    Incoming(dd),
-                    AntiPart(Incoming(dd1)),
-                    Outgoing(vv),
-                    AntiPart(Outgoing(vv))
-                };
-                calculateAndGenerateLib("Tree", toyModel, ins4, myLib,qData,pData);
-                
-            }*/
-        }
-        
-        /*
-        for( const auto &sb : smbath) {
-            for( const auto &sb1 : smbath) {
-                auto ins4 = {
-                    Incoming(dd),
-                    Outgoing(sb),
-                    AntiPart(Outgoing(sb1))
-                };
-                calculateAndGenerateLib("Tree", toyModel, ins4, myLib,qData,pData);
-                
-                //calculateAndGenerateLib("Asym", toyModel,ins4, myLib,qData,pData,false,true);
-                //calculateAndGenerateLib("Asym", toyModel,AntiPart(ins4), myLib,qData,pData,false,true);
-                
-                auto ins5 = {
-                    Incoming(dd),
-                    Outgoing(sb),
-                    Outgoing(sb1)
-                };
-                calculateAndGenerateLib("Tree", toyModel, ins5, myLib,qData,pData);
-                
-                //calculateAndGenerateLib("Asym", toyModel,ins5, myLib,qData,pData,false,true);
-                //calculateAndGenerateLib("Asym", toyModel,AntiPart(ins5), myLib,qData,pData,false,true);
-            }
-        }
-         */
-    }
-    /**/
-    
-    //============================================
-    
-    
-    auto insertion = {Incoming("N_3"), Outgoing("lL_3"), AntiPart(Outgoing("et"))};
-    
-    //calculateAndGenerateLib("Asym", toyModel,insertion, myLib,qData,pData,true,true);
-    
-    //calculateAndGenerateLib("Asym", toyModel,AntiPart(insertion), myLib,qData,pData,true,true);
-    
-    //=====================================================================================
-    /*
-     auto insertions =  {Incoming("etm"),Incoming("etm"),Outgoing("le"),Outgoing("le")};
-     
-     calculateAndGenerateLib("Lepto", toyModel, insertions, myLib,qData,pData);
-     
-     calculateAndGenerateLib("Lepto", toyModel, AntiPart(insertions) , myLib,qData,pData);
-     
-     
-     for (const auto &ll : leptons) {
-     for (const auto &ll1 : leptons) {
-     auto insertions =  {Incoming("etm"),Incoming("etm"),Outgoing(ll),Outgoing(ll1)};
-     
-     calculateAndGenerateLib("Lepto", toyModel, insertions, myLib,qData,pData);
-     
-     calculateAndGenerateLib("Lepto", toyModel, AntiPart(insertions) , myLib,qData,pData);
-     }
-     }
-     
-     for (const auto &ll : leptons) {
-     
-     auto ins0 = {Incoming("N_3"),Outgoing(ll),AntiPart(Outgoing("etm"))};
-     
-     calculateAndGenerateLib("Lepto", toyModel, ins0, myLib,qData,pData);
-     
-     calculateAndGenerateLib("Lepto", toyModel, AntiPart(ins0) , myLib,qData,pData);
-     
-     for( const auto &vv : vectors) {
-     
-     auto ins1 =  {Incoming("etm"),AntiPart(Incoming("N_3")),Outgoing(ll), Outgoing(vv)};
-     
-     calculateAndGenerateLib("Lepto", toyModel, ins1, myLib,qData,pData);
-     
-     calculateAndGenerateLib("Lepto", toyModel, AntiPart(ins1) , myLib,qData,pData);
-     }
-     
-     }
-     
-     for (const auto &ll : neutrinos) {
-     auto insertions = {
-     Incoming("N_3"),
-     Outgoing(ll),
-     AntiPart(Outgoing("eta_R"))
-     };
-     calculateAndGenerateLib("Lepto", toyModel, insertions, myLib,qData,pData);
-     
-     calculateAndGenerateLib("Lepto", toyModel, AntiPart(insertions) , myLib,qData,pData);
-     
-     insertions = {
-     Incoming("N_3"),
-     Outgoing(ll),
-     AntiPart(Outgoing("eta_I"))
-     };
-     calculateAndGenerateLib("Lepto", toyModel, insertions, myLib,qData,pData);
-     
-     calculateAndGenerateLib("Lepto", toyModel, AntiPart(insertions) , myLib,qData,pData);
-     }
-     */
-    /*
-     calculateAndGenerateLib("Lepto", toyModel, {Incoming("N_1"), Outgoing("le"), AntiPart(Outgoing("etm"))}, myLib,qData,pData);
-     calculateAndGenerateLib("Lepto", toyModel, {Incoming("N_1"), Outgoing("lmu"), AntiPart(Outgoing("etm"))}, myLib,qData,pData);
-     calculateAndGenerateLib("Lepto", toyModel, {Incoming("N_1"), Outgoing("ltau"), AntiPart(Outgoing("etm"))},myLib,qData,pData);
-     
-     calculateAndGenerateLib("Lepto", toyModel, {Incoming("N_1"), Outgoing("nu_e"), AntiPart(Outgoing("eta_R"))}, myLib,qData,pData);
-     calculateAndGenerateLib("Lepto", toyModel, {Incoming("N_1"), Outgoing("nu_mu"), AntiPart(Outgoing("eta_R"))}, myLib,qData,pData);
-     calculateAndGenerateLib("Lepto", toyModel, {Incoming("N_1"), Outgoing("nu_tau"), AntiPart(Outgoing("eta_R"))}, myLib,qData,pData);
-     
-     calculateAndGenerateLib("Lepto", toyModel, {Incoming("N_1"), Outgoing("nu_e"), AntiPart(Outgoing("eta_I"))}, myLib,qData,pData);
-     calculateAndGenerateLib("Lepto", toyModel, {Incoming("N_1"), Outgoing("nu_mu"), AntiPart(Outgoing("eta_I"))}, myLib,qData,pData);
-     calculateAndGenerateLib("Lepto", toyModel, {Incoming("N_1"), Outgoing("nu_tau"), AntiPart(Outgoing("eta_I"))}, myLib,qData,pData);
-     */
-    /*
-     
-     
-     */
-    
+    calculateAllAsymmetries(toyModel, myLib, qData, pData);
     
     ///////////////////////////////////////////////////
     // Saving JSON data to test.json

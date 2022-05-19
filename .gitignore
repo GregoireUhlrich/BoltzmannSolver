@@ -1,3 +1,7 @@
 # ignore vim recovery and swap files
 *~
 *.sw[p-z]
+
+LeptoProto*
+test*
+BRparity
